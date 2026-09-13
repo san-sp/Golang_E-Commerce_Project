@@ -1,0 +1,7 @@
+ALTER TABLE outbox_events
+ADD COLUMN status TEXT NOT NULL
+    DEFAULT 'PENDING'
+    CHECK (status IN ('PENDING', 'PROCESSING', 'PUBLISHED'));
+
+ALTER TABLE outbox_events
+ADD COLUMN processing_at TIMESTAMPTZ;
