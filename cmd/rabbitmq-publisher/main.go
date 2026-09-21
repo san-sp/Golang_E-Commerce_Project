@@ -1,17 +1,12 @@
-/*
-1. Connect to RabbitMQ
-2. Create channel
-3. Ensure exchange exists
-4. Publish message
-5. Close resources
-*/
-
 package main
 
-import "github.com/rabbitmq/amqp091-go"
+import (
+	"github.com/rabbitmq/amqp091-go"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/messaging"
+)
 
 func main() {
-	conn, err := amqp091.Dial("amqp://guest:guest@localhost:5672/")
+	conn, err := messaging.NewRabbitMQ("amqp://guest:guest@localhost:5672/")
 	if err != nil {
 		println("Failed to connect to RabbitMQ")
 		return
@@ -20,10 +15,16 @@ func main() {
 
 	ch, err := conn.Channel()
 	if err != nil {
-		println("Faile to create RabbitMQ channel")
+		println("Failed to create RabbitMQ channel")
 		return
 	}
 	defer ch.Close()
+
+	publisher, err := messaging.NewPublisher(ch)
+	if err != nil {
+		println("Failed to create publisher")
+		return
+	}
 
 	err = ch.ExchangeDeclare(
 		"ecommerce.events",
@@ -45,11 +46,9 @@ func main() {
 		Body:         []byte(`{"payment_id":"pay_123","order_id":"order_123","amount":899900}`),
 	}
 
-	err = ch.Publish(
+	err = publisher.Publish(
 		"ecommerce.events",
 		"payment.succeeded",
-		false,
-		false,
 		message,
 	)
 	if err != nil {
@@ -57,8 +56,5 @@ func main() {
 		return
 	}
 
-	println("Connected to RabbitMQ")
-	println("RabbitMQ channel created")
-	println("Exchange declared")
 	println("Message published")
 }
