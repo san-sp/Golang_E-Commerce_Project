@@ -1,11 +1,23 @@
 package main
 
 import (
+	"errors"
+
 	"github.com/rabbitmq/amqp091-go"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/messaging"
 )
 
+const maxRetries = 3
+
+func handleMessage(message amqp091.Delivery) (messaging.ProcessingResult, error) {
+	println(string(message.Body))
+
+	// return messaging.ProcessingSuccess, nil
+	return messaging.ProcessingRetry, errors.New("temporary failure")
+}
+
 func main() {
-	conn, err := amqp091.Dial("amqp://guest:guest@localhost:5672/")
+	conn, err := messaging.NewRabbitMQ("amqp://guest:guest@localhost:5672/")
 	if err != nil {
 		println("Failed to connect to RabbitMQ")
 		return
@@ -33,13 +45,39 @@ func main() {
 		return
 	}
 
+	err = ch.ExchangeDeclare(
+		"payment-retry-exchange",
+		"direct",
+		true,
+		false,
+		false,
+		false,
+		nil,
+	)
+	if err != nil {
+		println("Failed to declare retry exchange")
+		return
+	}
+
+	err = ch.Confirm(false)
+	if err != nil {
+		println("Failed to enable publisher confirms")
+		return
+	}
+
+	// confirms := ch.NotifyPublish(make(chan amqp091.Confirmation, 1))
+
 	queue, err := ch.QueueDeclare(
 		"payment-events",
 		true,
 		false,
 		false,
 		false,
-		nil,
+		// nil,
+		amqp091.Table{
+			"x-dead-letter-exchange":    "payment-dlx",
+			"x-dead-letter-routing-key": "payment.dead",
+		},
 	)
 	if err != nil {
 		println("Failed to decalre queue")
@@ -58,44 +96,72 @@ func main() {
 		return
 	}
 
-	messages, err := ch.Consume(
-		queue.Name,
-		"",
-		false,
-		false,
-		false,
-		false,
-		nil,
-	)
+	consumer := messaging.NewConsumer(ch)
+
+	publisher, err := messaging.NewPublisher(ch)
 	if err != nil {
-		println("Failed to register consumer")
+		println("Failed to create publisher:", err)
+		return
 	}
 
-	for message := range messages {
-		println(string(message.Body))
+	retryHandler := func(message amqp091.Delivery) error {
+		retryCount := 0
+
+		if value, ok := message.Headers["retry-count"]; ok {
+			retryCount = int(value.(int32))
+		}
+
+		if retryCount >= maxRetries {
+			return publisher.Publish(
+				"payment-dlx",
+				"payment.dead",
+				amqp091.Publishing{
+					ContentType:  message.ContentType,
+					DeliveryMode: message.DeliveryMode,
+					Body:         message.Body,
+					Headers:      message.Headers,
+				},
+			)
+		}
+
+		retryCount++
+
+		headers := amqp091.Table{
+			"retry-count": int32(retryCount),
+		}
+
+		return publisher.Publish(
+			"payment-retry-exchange",
+			"payment.retry",
+			amqp091.Publishing{
+				ContentType:  message.ContentType,
+				DeliveryMode: message.DeliveryMode,
+				Body:         message.Body,
+				Headers:      headers,
+			},
+		)
 	}
 
-	// message := amqp091.Publishing{
-	// 	ContentType:  "application/json",
-	// 	DeliveryMode: amqp091.Persistent,
-	// 	Body:         []byte(`{"payment_id":"pay_123","order_id":"order_123","amount":"899900}`),
-	// }
+	err = consumer.SetQoS(1)
+	if err != nil {
+		println("Failed to set QoS")
+		return
+	}
 
-	// err = ch.Publish(
-	// 	"ecommerce.events",
-	// 	"payment.succeeded",
-	// 	false,
-	// 	false,
-	// 	message,
-	// )
-	// if err != nil {
-	// 	println("Failed to publish message")
-	// }
+	err = consumer.Start(
+		queue.Name,
+		handleMessage,
+		retryHandler,
+	)
+
+	if err != nil {
+		println("Consumer stopped:", err)
+		return
+	}
 
 	println("Connected to RabbitMQ")
 	println("RabbitMQ channel created")
 	println("Exchange declared")
 	println("Payment queue declared")
 	println("Payment queue bound to exchange")
-	// println("Message published")
 }
