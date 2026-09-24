@@ -104,43 +104,14 @@ func main() {
 		return
 	}
 
-	retryHandler := func(message amqp091.Delivery) error {
-		retryCount := 0
-
-		if value, ok := message.Headers["retry-count"]; ok {
-			retryCount = int(value.(int32))
-		}
-
-		if retryCount >= maxRetries {
-			return publisher.Publish(
-				"payment-dlx",
-				"payment.dead",
-				amqp091.Publishing{
-					ContentType:  message.ContentType,
-					DeliveryMode: message.DeliveryMode,
-					Body:         message.Body,
-					Headers:      message.Headers,
-				},
-			)
-		}
-
-		retryCount++
-
-		headers := amqp091.Table{
-			"retry-count": int32(retryCount),
-		}
-
-		return publisher.Publish(
-			"payment-retry-exchange",
-			"payment.retry",
-			amqp091.Publishing{
-				ContentType:  message.ContentType,
-				DeliveryMode: message.DeliveryMode,
-				Body:         message.Body,
-				Headers:      headers,
-			},
-		)
-	}
+	retryPolicy := messaging.NewRetryPolicy(
+		publisher,
+		maxRetries,
+		"payment-retry-exchange",
+		"payment.retry",
+		"payment-dlx",
+		"payment.dead",
+	)
 
 	err = consumer.SetQoS(1)
 	if err != nil {
@@ -151,7 +122,7 @@ func main() {
 	err = consumer.Start(
 		queue.Name,
 		handleMessage,
-		retryHandler,
+		retryPolicy.Handle,
 	)
 
 	if err != nil {
