@@ -74,18 +74,28 @@ func main() {
 
 	queries := db.New(pool)
 
-	err = queries.RecoverStaleOutboxEvents(ctx)
+	err = processOutbox(ctx, queries, publisher)
 	if err != nil {
-		fmt.Println("Failed to recover stale outbox events:", err)
+		fmt.Println("Outbox processing failed:", err)
 		return
+	}
+}
+
+func processOutbox(
+	ctx context.Context,
+	queries *db.Queries,
+	publisher *messaging.Publisher,
+) error {
+	err := queries.RecoverStaleOutboxEvents(ctx)
+	if err != nil {
+		return fmt.Errorf("recover stale outbox events: %w", err)
 	}
 
 	fmt.Println("Recovered stale outbox events")
 
 	events, err := queries.ClaimPendingOutboxEvents(ctx)
 	if err != nil {
-		fmt.Println("Failed to fetch pending outbox events:", err)
-		return
+		return fmt.Errorf("claim pending outbox events: %w", err)
 	}
 
 	fmt.Println("Claimed outbox events:", len(events))
@@ -97,15 +107,29 @@ func main() {
 			event.EventType,
 		)
 
-		err := queries.MarkOutboxPublishAttempt(ctx, event.ID)
+		routingKey, err := routingKeyForEvent(event.EventType)
 		if err != nil {
-			fmt.Println("Failed to record publish attempt:", err)
+			fmt.Printf(
+				"Failed to determine routing key for %s: %v\n",
+				event.ID,
+				err,
+			)
+			continue
+		}
+
+		err = queries.MarkOutboxPublishAttempt(ctx, event.ID)
+		if err != nil {
+			fmt.Printf(
+				"Failed to record publish attempt for %s: %v\n",
+				event.ID,
+				err,
+			)
 			continue
 		}
 
 		err = publisher.Publish(
 			"ecommerce.events",
-			"payment.succeeded",
+			routingKey,
 			amqp091.Publishing{
 				ContentType:  "application/json",
 				DeliveryMode: amqp091.Persistent,
@@ -113,15 +137,39 @@ func main() {
 			},
 		)
 		if err != nil {
-			fmt.Println("Failed to publish event:", err)
+			fmt.Printf(
+				"Failed to publish event %s: %v\n",
+				event.ID,
+				err,
+			)
 			continue
 		}
 
 		err = queries.MarkOutboxEventPublished(ctx, event.ID)
 		if err != nil {
-			fmt.Println("Failed to mark event as published:", err)
+			fmt.Printf(
+				"Failed to mark event %s as published: %v\n",
+				event.ID,
+				err,
+			)
 			continue
 		}
+
 		fmt.Println("Event published successfully")
+	}
+
+	return nil
+}
+
+func routingKeyForEvent(eventType string) (string, error) {
+	switch eventType {
+	case "PAYMENT_SUCCEEDED":
+		return "payment.succeeded", nil
+	case "ORDER_CREATED":
+		return "order.created", nil
+	case "RESERVATION_CONFIRMED":
+		return "reservation.confirmed", nil
+	default:
+		return "", fmt.Errorf("unknown event type: %s", eventType)
 	}
 }

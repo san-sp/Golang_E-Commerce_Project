@@ -11,6 +11,7 @@ import (
 type Publisher struct {
 	channel     *amqp091.Channel
 	confirms    chan amqp091.Confirmation
+	returns     chan amqp091.Return
 	closeNotify chan *amqp091.Error
 }
 
@@ -21,12 +22,14 @@ func NewPublisher(channel *amqp091.Channel) (*Publisher, error) {
 	}
 
 	confirms := channel.NotifyPublish(make(chan amqp091.Confirmation, 1))
+	returns := channel.NotifyReturn(make(chan amqp091.Return, 1))
 	closeNotify := make(chan *amqp091.Error, 1)
 	channel.NotifyClose(closeNotify)
 
 	return &Publisher{
 		channel:     channel,
 		confirms:    confirms,
+		returns:     returns,
 		closeNotify: closeNotify,
 	}, nil
 }
@@ -39,7 +42,7 @@ func (p *Publisher) Publish(
 	err := p.channel.Publish(
 		exchange,
 		routingKey,
-		false,
+		true,
 		false,
 		message,
 	)
@@ -56,6 +59,20 @@ func (p *Publisher) Publish(
 		if !confirmation.Ack {
 			return errors.New("RabbitMQ rejected the message")
 		}
+
+	case returned, ok := <-p.returns:
+		if !ok {
+			return errors.New("RabbitMQ return channel closed")
+		}
+
+		return fmt.Errorf(
+			"RabbitMQ returned unroutable message: exchange=%s routing_key=%s reply_code=%d reply_text=%s",
+			returned.Exchange,
+			returned.RoutingKey,
+			returned.ReplyCode,
+			returned.ReplyText,
+		)
+
 	case <-time.After(5 * time.Second):
 		return errors.New("Timed out for RabbitMQ confirmation")
 	}
