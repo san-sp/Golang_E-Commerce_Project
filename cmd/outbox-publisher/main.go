@@ -4,13 +4,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/rabbitmq/amqp091-go"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/messaging"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/outbox"
 )
 
 func main() {
@@ -27,7 +29,11 @@ func main() {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+	)
+	defer stop()
 
 	pool, err := database.NewPostgres(ctx, databaseURL)
 	if err != nil {
@@ -74,102 +80,13 @@ func main() {
 
 	queries := db.New(pool)
 
-	err = processOutbox(ctx, queries, publisher)
-	if err != nil {
-		fmt.Println("Outbox processing failed:", err)
-		return
-	}
-}
+	worker := outbox.NewWorker(
+		queries,
+		publisher,
+		5*time.Second,
+	)
 
-func processOutbox(
-	ctx context.Context,
-	queries *db.Queries,
-	publisher *messaging.Publisher,
-) error {
-	err := queries.RecoverStaleOutboxEvents(ctx)
-	if err != nil {
-		return fmt.Errorf("recover stale outbox events: %w", err)
-	}
-
-	fmt.Println("Recovered stale outbox events")
-
-	events, err := queries.ClaimPendingOutboxEvents(ctx)
-	if err != nil {
-		return fmt.Errorf("claim pending outbox events: %w", err)
-	}
-
-	fmt.Println("Claimed outbox events:", len(events))
-
-	for _, event := range events {
-		fmt.Printf(
-			"Processing event: %s | Type: %s\n",
-			event.ID,
-			event.EventType,
-		)
-
-		routingKey, err := routingKeyForEvent(event.EventType)
-		if err != nil {
-			fmt.Printf(
-				"Failed to determine routing key for %s: %v\n",
-				event.ID,
-				err,
-			)
-			continue
-		}
-
-		err = queries.MarkOutboxPublishAttempt(ctx, event.ID)
-		if err != nil {
-			fmt.Printf(
-				"Failed to record publish attempt for %s: %v\n",
-				event.ID,
-				err,
-			)
-			continue
-		}
-
-		err = publisher.Publish(
-			"ecommerce.events",
-			routingKey,
-			amqp091.Publishing{
-				ContentType:  "application/json",
-				DeliveryMode: amqp091.Persistent,
-				Body:         event.Payload,
-			},
-		)
-		if err != nil {
-			fmt.Printf(
-				"Failed to publish event %s: %v\n",
-				event.ID,
-				err,
-			)
-			continue
-		}
-
-		err = queries.MarkOutboxEventPublished(ctx, event.ID)
-		if err != nil {
-			fmt.Printf(
-				"Failed to mark event %s as published: %v\n",
-				event.ID,
-				err,
-			)
-			continue
-		}
-
-		fmt.Println("Event published successfully")
-	}
-
-	return nil
-}
-
-func routingKeyForEvent(eventType string) (string, error) {
-	switch eventType {
-	case "PAYMENT_SUCCEEDED":
-		return "payment.succeeded", nil
-	case "ORDER_CREATED":
-		return "order.created", nil
-	case "RESERVATION_CONFIRMED":
-		return "reservation.confirmed", nil
-	default:
-		return "", fmt.Errorf("unknown event type: %s", eventType)
+	if err := worker.Run(ctx); err != nil {
+		fmt.Println("Outbox worker failed:", err)
 	}
 }
