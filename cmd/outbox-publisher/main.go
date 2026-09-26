@@ -74,6 +74,14 @@ func main() {
 
 	queries := db.New(pool)
 
+	err = queries.RecoverStaleOutboxEvents(ctx)
+	if err != nil {
+		fmt.Println("Failed to recover stale outbox events:", err)
+		return
+	}
+
+	fmt.Println("Recovered stale outbox events")
+
 	events, err := queries.ClaimPendingOutboxEvents(ctx)
 	if err != nil {
 		fmt.Println("Failed to fetch pending outbox events:", err)

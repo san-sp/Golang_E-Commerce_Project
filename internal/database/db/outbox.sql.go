@@ -141,3 +141,17 @@ func (q *Queries) MarkOutboxPublishAttempt(ctx context.Context, id pgtype.UUID) 
 	_, err := q.db.Exec(ctx, markOutboxPublishAttempt, id)
 	return err
 }
+
+const recoverStaleOutboxEvents = `-- name: RecoverStaleOutboxEvents :exec
+UPDATE outbox_events
+SET
+    status = 'PENDING',
+    processing_at = NULL
+WHERE status = 'PROCESSING'
+  AND processing_at < NOW() - INTERVAL '5 minutes'
+`
+
+func (q *Queries) RecoverStaleOutboxEvents(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, recoverStaleOutboxEvents)
+	return err
+}

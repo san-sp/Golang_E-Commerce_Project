@@ -53,4 +53,12 @@ SET
     status = 'PUBLISHED',
     published_at = NOW()
 WHERE id = $1
-  AND status = 'PROCESSING';    
+  AND status = 'PROCESSING';
+
+-- name: RecoverStaleOutboxEvents :exec
+UPDATE outbox_events
+SET
+    status = 'PENDING',
+    processing_at = NULL
+WHERE status = 'PROCESSING'
+  AND processing_at < NOW() - INTERVAL '5 minutes';
