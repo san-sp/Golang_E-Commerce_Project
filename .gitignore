@@ -3,3 +3,6 @@ My_Study_Material/
 
 # Local VS Code settings
 .vscode/
+
+# Local environment variables
+.env
