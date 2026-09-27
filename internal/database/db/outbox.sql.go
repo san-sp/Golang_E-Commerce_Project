@@ -68,6 +68,33 @@ func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, 
 	return items, nil
 }
 
+const deletePublishedOutboxEventsBefore = `-- name: DeletePublishedOutboxEventsBefore :execrows
+WITH deletable AS (
+    SELECT id
+    FROM outbox_events
+    WHERE outbox_events.status = 'PUBLISHED'
+      AND outbox_events.published_at < $1
+    ORDER BY outbox_events.published_at
+    LIMIT $2
+)
+DELETE FROM outbox_events AS o
+USING deletable
+WHERE o.id = deletable.id
+`
+
+type DeletePublishedOutboxEventsBeforeParams struct {
+	PublishedAt pgtype.Timestamptz
+	Limit       int32
+}
+
+func (q *Queries) DeletePublishedOutboxEventsBefore(ctx context.Context, arg DeletePublishedOutboxEventsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePublishedOutboxEventsBefore, arg.PublishedAt, arg.Limit)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listPendingOutboxEvents = `-- name: ListPendingOutboxEvents :many
 SELECT
     id,

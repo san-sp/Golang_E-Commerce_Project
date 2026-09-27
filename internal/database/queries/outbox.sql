@@ -62,3 +62,16 @@ SET
     processing_at = NULL
 WHERE status = 'PROCESSING'
   AND processing_at < NOW() - INTERVAL '5 minutes';
+
+-- name: DeletePublishedOutboxEventsBefore :execrows
+WITH deletable AS (
+    SELECT id
+    FROM outbox_events
+    WHERE outbox_events.status = 'PUBLISHED'
+      AND outbox_events.published_at < $1
+    ORDER BY outbox_events.published_at
+    LIMIT $2
+)
+DELETE FROM outbox_events AS o
+USING deletable
+WHERE o.id = deletable.id;

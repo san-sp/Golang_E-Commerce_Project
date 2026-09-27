@@ -5,15 +5,19 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/rabbitmq/amqp091-go"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/messaging"
 )
 
 type Worker struct {
-	queries   *db.Queries
-	publisher *messaging.Publisher
-	interval  time.Duration
+	queries          *db.Queries
+	publisher        *messaging.Publisher
+	interval         time.Duration
+	cleanupInterval  time.Duration
+	retention        time.Duration
+	cleanupBatchSize int32
 }
 
 func NewWorker(
@@ -22,15 +26,49 @@ func NewWorker(
 	interval time.Duration,
 ) *Worker {
 	return &Worker{
-		queries:   queries,
-		publisher: publisher,
-		interval:  interval,
+		queries:          queries,
+		publisher:        publisher,
+		interval:         interval,
+		cleanupInterval:  time.Hour,
+		retention:        7 * 24 * time.Hour,
+		cleanupBatchSize: 500,
 	}
+}
+
+func (w *Worker) cleanup(ctx context.Context) error {
+	cutoff := time.Now().Add(-w.retention)
+
+	deleted, err := w.queries.DeletePublishedOutboxEventsBefore(
+		ctx,
+		db.DeletePublishedOutboxEventsBeforeParams{
+			PublishedAt: pgtype.Timestamptz{
+				Time:  cutoff,
+				Valid: true,
+			},
+			Limit: w.cleanupBatchSize,
+		},
+	)
+	if err != nil {
+		return fmt.Errorf("delete old published outbox events: %w", err)
+	}
+
+	if deleted > 0 {
+		fmt.Println("Deleted old published outbox events:", deleted)
+	}
+
+	return nil
 }
 
 func (w *Worker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
+
+	cleanupTicker := time.NewTicker(w.cleanupInterval)
+	defer cleanupTicker.Stop()
+
+	if err := w.cleanup(ctx); err != nil {
+		fmt.Println("Initial outbox cleanup failed:", err)
+	}
 
 	for {
 		if err := w.process(ctx); err != nil {
@@ -39,6 +77,13 @@ func (w *Worker) Run(ctx context.Context) error {
 
 		select {
 		case <-ticker.C:
+			continue
+
+		case <-cleanupTicker.C:
+			if err := w.cleanup(ctx); err != nil {
+				fmt.Println("Outbox cleanup failed:", err)
+			}
+
 		case <-ctx.Done():
 			fmt.Println("Shutting down outbox worker...")
 			return nil
