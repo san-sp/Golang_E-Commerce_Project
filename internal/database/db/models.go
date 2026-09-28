@@ -28,6 +28,18 @@ type OutboxEvent struct {
 	ProcessingAt    pgtype.Timestamptz
 }
 
+type Payment struct {
+	ID                pgtype.UUID
+	ReservationID     pgtype.UUID
+	Provider          string
+	ProviderPaymentID pgtype.Text
+	Amount            int64
+	Currency          string
+	Status            string
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+}
+
 type Product struct {
 	ID          pgtype.UUID
 	Name        string
