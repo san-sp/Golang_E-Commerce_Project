@@ -40,6 +40,14 @@ type Payment struct {
 	UpdatedAt         pgtype.Timestamptz
 }
 
+type PaymentEvent struct {
+	ID        pgtype.UUID
+	EventID   string
+	PaymentID pgtype.UUID
+	EventType string
+	CreatedAt pgtype.Timestamptz
+}
+
 type Product struct {
 	ID          pgtype.UUID
 	Name        string

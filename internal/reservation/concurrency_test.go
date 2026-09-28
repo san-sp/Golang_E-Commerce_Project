@@ -59,35 +59,28 @@ func TestConcurrentReservations(t *testing.T) {
 		Valid: true,
 	}
 
-	// _ = sync.WaitGroup{}
-	// _ = service
-	// _ = variantID
-	// _ = expiresAt
-
-	// prepare the database inside the test
 	var originalQuantity int64
 
 	err = pool.QueryRow(
 		ctx,
 		`SELECT quantity
-	 FROM inventory
-	 WHERE variant_id = $1`,
+		 FROM inventory
+		 WHERE variant_id = $1`,
 		variantID,
 	).Scan(&originalQuantity)
 	if err != nil {
 		t.Fatalf("get original inventory quantity: %v", err)
 	}
 
-	// check that we don't already have active reservations
 	var activeReservations int64
 
 	err = pool.QueryRow(
 		ctx,
 		`SELECT COUNT(*)
-	 FROM reservations
-	 WHERE variant_id = $1
-	   AND status = 'ACTIVE'
-	   AND expires_at > NOW()`,
+		 FROM reservations
+		 WHERE variant_id = $1
+		   AND status = 'ACTIVE'
+		   AND expires_at > NOW()`,
 		variantID,
 	).Scan(&activeReservations)
 	if err != nil {
@@ -101,27 +94,26 @@ func TestConcurrentReservations(t *testing.T) {
 		)
 	}
 
-	// temporarily change stock to 1
 	_, err = pool.Exec(
 		ctx,
 		`UPDATE inventory
-	 SET quantity = 1,
-	     updated_at = NOW()
-	 WHERE variant_id = $1`,
+		 SET quantity = 1,
+		     updated_at = NOW()
+		 WHERE variant_id = $1`,
 		variantID,
 	)
 	if err != nil {
 		t.Fatalf("set test inventory quantity: %v", err)
 	}
 
-	// now our test database is 1 and we MUST restore it
+	// Always restore the original inventory quantity.
 	t.Cleanup(func() {
 		_, err := pool.Exec(
 			ctx,
 			`UPDATE inventory
-		 SET quantity = $1,
-		     updated_at = NOW()
-		 WHERE variant_id = $2`,
+			 SET quantity = $1,
+			     updated_at = NOW()
+			 WHERE variant_id = $2`,
 			originalQuantity,
 			variantID,
 		)
@@ -130,7 +122,6 @@ func TestConcurrentReservations(t *testing.T) {
 		}
 	})
 
-	// create the two concurrent requests
 	start := make(chan struct{})
 	results := make(chan reservationResult, 2)
 
@@ -156,6 +147,7 @@ func TestConcurrentReservations(t *testing.T) {
 			}
 		}()
 	}
+
 	close(start)
 
 	wg.Wait()
@@ -164,37 +156,59 @@ func TestConcurrentReservations(t *testing.T) {
 	successes := 0
 	failures := 0
 
+	var createdReservationIDs []pgtype.UUID
+
 	for result := range results {
 		if result.err == nil {
 			successes++
 
-			t.Cleanup(func() {
-				_, err := pool.Exec(
-					ctx,
-					"DELETE FROM reservations WHERE id = $1",
-					result.reservation.ID,
-				)
-				if err != nil {
-					t.Logf(
-						"cleanup reservation %s failed: %v",
-						result.reservation.ID,
-						err,
-					)
-				}
-			})
+			createdReservationIDs = append(
+				createdReservationIDs,
+				result.reservation.ID,
+			)
 
 			continue
 		}
 
 		failures++
-		t.Logf("reservation failed as expected: %v", result.err)
+
+		t.Logf(
+			"reservation failed as expected: %v",
+			result.err,
+		)
 	}
 
+	// Clean up only the reservations created by this test.
+	t.Cleanup(func() {
+		for _, reservationID := range createdReservationIDs {
+			_, err := pool.Exec(
+				ctx,
+				`DELETE FROM reservations
+				 WHERE id = $1`,
+				reservationID,
+			)
+
+			if err != nil {
+				t.Logf(
+					"cleanup reservation %s failed: %v",
+					reservationID,
+					err,
+				)
+			}
+		}
+	})
+
 	if successes != 1 {
-		t.Fatalf("expected exactly 1 successful reservation, got %d", successes)
+		t.Fatalf(
+			"expected exactly 1 successful reservation, got %d",
+			successes,
+		)
 	}
 
 	if failures != 1 {
-		t.Fatalf("expected exactly 1 failed reservation, got %d", failures)
+		t.Fatalf(
+			"expected exactly 1 failed reservation, got %d",
+			failures,
+		)
 	}
 }
