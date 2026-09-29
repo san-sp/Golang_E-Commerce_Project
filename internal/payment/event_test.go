@@ -135,11 +135,29 @@ func TestRecordPaymentEventDuplicate(t *testing.T) {
 	t.Cleanup(func() {
 		_, err := pool.Exec(
 			ctx,
+			"DELETE FROM payment_events WHERE payment_id = $1",
+			payment.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
 			"DELETE FROM payments WHERE id = $1",
 			payment.ID,
 		)
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
 		}
 	})
 

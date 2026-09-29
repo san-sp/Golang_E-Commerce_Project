@@ -92,6 +92,15 @@ func TestCreatePayment(t *testing.T) {
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
 		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
+		}
 	})
 
 	if payment.Status != "PENDING" {
@@ -250,6 +259,15 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
 		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
+		}
 	})
 }
 
@@ -364,6 +382,15 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
 		}
 	})
 }
@@ -485,6 +512,15 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
 		}
 	})
 

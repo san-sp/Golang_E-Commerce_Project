@@ -43,4 +43,21 @@ RETURNING
     expires_at,
     created_at,
     updated_at;
-    
+
+-- name: ConfirmReservation :one
+UPDATE reservations
+SET
+    status = 'CONFIRMED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+  AND expires_at > NOW()
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at;  

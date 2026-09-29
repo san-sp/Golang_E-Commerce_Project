@@ -11,6 +11,41 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const confirmReservation = `-- name: ConfirmReservation :one
+UPDATE reservations
+SET
+    status = 'CONFIRMED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+  AND expires_at > NOW()
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) ConfirmReservation(ctx context.Context, id pgtype.UUID) (Reservation, error) {
+	row := q.db.QueryRow(ctx, confirmReservation, id)
+	var i Reservation
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.OrderID,
+		&i.Quantity,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createReservation = `-- name: CreateReservation :one
 INSERT INTO reservations (
     variant_id,

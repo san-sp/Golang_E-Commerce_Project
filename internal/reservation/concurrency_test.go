@@ -44,84 +44,102 @@ func TestConcurrentReservations(t *testing.T) {
 	queries := db.New(pool)
 	service := NewService(pool, queries)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
+	// Create isolated test data.
+	var productID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+		 VALUES ('Concurrency Test Product', 'Test product')
+		 RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
 	}
+
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+			product_id,
+			sku,
+			price
+		)
+		VALUES (
+			$1,
+			'test-concurrency-' || gen_random_uuid()::text,
+			899900
+		)
+		RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (
+			variant_id,
+			quantity
+		)
+		VALUES ($1, 1)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	// Clean up everything created by this test.
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM reservations
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservations failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM inventory
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup inventory failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants
+			 WHERE id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup product variant failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM products
+			 WHERE id = $1`,
+			productID,
+		)
+		if err != nil {
+			t.Logf("cleanup product failed: %v", err)
+		}
+	})
 
 	expiresAt := pgtype.Timestamptz{
 		Time:  time.Now().Add(10 * time.Minute),
 		Valid: true,
 	}
 
-	var originalQuantity int64
-
-	err = pool.QueryRow(
-		ctx,
-		`SELECT quantity
-		 FROM inventory
-		 WHERE variant_id = $1`,
-		variantID,
-	).Scan(&originalQuantity)
-	if err != nil {
-		t.Fatalf("get original inventory quantity: %v", err)
-	}
-
-	var activeReservations int64
-
-	err = pool.QueryRow(
-		ctx,
-		`SELECT COUNT(*)
-		 FROM reservations
-		 WHERE variant_id = $1
-		   AND status = 'ACTIVE'
-		   AND expires_at > NOW()`,
-		variantID,
-	).Scan(&activeReservations)
-	if err != nil {
-		t.Fatalf("count active reservations: %v", err)
-	}
-
-	if activeReservations != 0 {
-		t.Fatalf(
-			"expected no active reservations before concurrency test, found %d",
-			activeReservations,
-		)
-	}
-
-	_, err = pool.Exec(
-		ctx,
-		`UPDATE inventory
-		 SET quantity = 1,
-		     updated_at = NOW()
-		 WHERE variant_id = $1`,
-		variantID,
-	)
-	if err != nil {
-		t.Fatalf("set test inventory quantity: %v", err)
-	}
-
-	// Always restore the original inventory quantity.
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			`UPDATE inventory
-			 SET quantity = $1,
-			     updated_at = NOW()
-			 WHERE variant_id = $2`,
-			originalQuantity,
-			variantID,
-		)
-		if err != nil {
-			t.Logf("restore inventory failed: %v", err)
-		}
-	})
-
+	// Create two concurrent requests.
 	start := make(chan struct{})
 	results := make(chan reservationResult, 2)
 
@@ -156,17 +174,9 @@ func TestConcurrentReservations(t *testing.T) {
 	successes := 0
 	failures := 0
 
-	var createdReservationIDs []pgtype.UUID
-
 	for result := range results {
 		if result.err == nil {
 			successes++
-
-			createdReservationIDs = append(
-				createdReservationIDs,
-				result.reservation.ID,
-			)
-
 			continue
 		}
 
@@ -177,26 +187,6 @@ func TestConcurrentReservations(t *testing.T) {
 			result.err,
 		)
 	}
-
-	// Clean up only the reservations created by this test.
-	t.Cleanup(func() {
-		for _, reservationID := range createdReservationIDs {
-			_, err := pool.Exec(
-				ctx,
-				`DELETE FROM reservations
-				 WHERE id = $1`,
-				reservationID,
-			)
-
-			if err != nil {
-				t.Logf(
-					"cleanup reservation %s failed: %v",
-					reservationID,
-					err,
-				)
-			}
-		}
-	})
 
 	if successes != 1 {
 		t.Fatalf(

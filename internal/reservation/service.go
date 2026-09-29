@@ -82,3 +82,21 @@ func (s *Service) CreateReservation(
 
 	return reservation, nil
 }
+
+func (s *Service) ConfirmReservation(
+	ctx context.Context,
+	reservationID pgtype.UUID,
+) (db.Reservation, error) {
+	reservation, err := s.queries.ConfirmReservation(
+		ctx,
+		reservationID,
+	)
+	if err != nil {
+		return db.Reservation{}, fmt.Errorf(
+			"confirm reservation: %w",
+			err,
+		)
+	}
+
+	return reservation, nil
+}
