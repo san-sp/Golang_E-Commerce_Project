@@ -9,7 +9,7 @@ import (
 var ErrDuplicateWebhook = errors.New("payment webhook already processed")
 
 type PaymentWebhook struct {
-	EventID   string
-	EventType string
-	PaymentID pgtype.UUID
+	EventID   string      `json:"event_id"`
+	EventType string      `json:"event_type"`
+	PaymentID pgtype.UUID `json:"payment_id"`
 }
