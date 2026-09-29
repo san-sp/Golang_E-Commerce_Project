@@ -75,3 +75,23 @@ WITH deletable AS (
 DELETE FROM outbox_events AS o
 USING deletable
 WHERE o.id = deletable.id;
+
+-- name: CreateOutboxEvent :one
+INSERT INTO outbox_events (
+    event_type,
+    payload
+)
+VALUES (
+    $1,
+    $2
+)
+RETURNING
+    id,
+    event_type,
+    payload,
+    created_at,
+    published_at,
+    last_attempted_at,
+    attempts,
+    status,
+    processing_at;

@@ -2,9 +2,11 @@ package payment
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -115,6 +117,99 @@ func (s *Service) MarkPaymentSucceeded(
 	if err != nil {
 		return db.Payment{}, fmt.Errorf(
 			"mark payment succeeded: %w",
+			err,
+		)
+	}
+
+	return payment, nil
+}
+
+func (s *Service) ProcessPaymentWebhook(
+	ctx context.Context,
+	webhook PaymentWebhook,
+) (db.Payment, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"begin payment webhook transaction: %w",
+			err,
+		)
+	}
+	defer tx.Rollback(ctx)
+
+	txQueries := s.queries.WithTx(tx)
+
+	_, err = txQueries.RecordPaymentEvent(
+		ctx,
+		db.RecordPaymentEventParams{
+			EventID:   webhook.EventID,
+			PaymentID: webhook.PaymentID,
+			EventType: webhook.EventType,
+		},
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Payment{}, ErrDuplicateWebhook
+		}
+
+		return db.Payment{}, fmt.Errorf(
+			"record payment event: %w",
+			err,
+		)
+	}
+
+	payment, err := txQueries.MarkPaymentSucceeded(
+		ctx,
+		webhook.PaymentID,
+	)
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"mark payment succeeded: %w",
+			err,
+		)
+	}
+
+	_, err = txQueries.ConfirmReservation(
+		ctx,
+		payment.ReservationID,
+	)
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"confirm reservation: %w",
+			err,
+		)
+	}
+
+	payload, err := json.Marshal(map[string]interface{}{
+		"payment_id":     payment.ID,
+		"reservation_id": payment.ReservationID,
+		"amount":         payment.Amount,
+		"currency":       payment.Currency,
+	})
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"marshal payment succeeded event: %w",
+			err,
+		)
+	}
+
+	_, err = txQueries.CreateOutboxEvent(
+		ctx,
+		db.CreateOutboxEventParams{
+			EventType: "PAYMENT_SUCCEEDED",
+			Payload:   payload,
+		},
+	)
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"create payment succeeded outbox event: %w",
+			err,
+		)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"commit payment webhook transaction: %w",
 			err,
 		)
 	}

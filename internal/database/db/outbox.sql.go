@@ -68,6 +68,49 @@ func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, 
 	return items, nil
 }
 
+const createOutboxEvent = `-- name: CreateOutboxEvent :one
+INSERT INTO outbox_events (
+    event_type,
+    payload
+)
+VALUES (
+    $1,
+    $2
+)
+RETURNING
+    id,
+    event_type,
+    payload,
+    created_at,
+    published_at,
+    last_attempted_at,
+    attempts,
+    status,
+    processing_at
+`
+
+type CreateOutboxEventParams struct {
+	EventType string
+	Payload   []byte
+}
+
+func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (OutboxEvent, error) {
+	row := q.db.QueryRow(ctx, createOutboxEvent, arg.EventType, arg.Payload)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.EventType,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.PublishedAt,
+		&i.LastAttemptedAt,
+		&i.Attempts,
+		&i.Status,
+		&i.ProcessingAt,
+	)
+	return i, err
+}
+
 const deletePublishedOutboxEventsBefore = `-- name: DeletePublishedOutboxEventsBefore :execrows
 WITH deletable AS (
     SELECT id

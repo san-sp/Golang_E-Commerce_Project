@@ -2,6 +2,8 @@ package payment
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -161,4 +163,599 @@ func TestRecordPaymentEventDuplicate(t *testing.T) {
 		}
 	})
 
+}
+
+func TestProcessPaymentWebhook(t *testing.T) {
+	err := godotenv.Load("../../.env")
+	if err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+	provider := NewMockProvider()
+
+	service := NewService(
+		pool,
+		queries,
+		provider,
+	)
+
+	reservationService := reservation.NewService(pool, queries)
+
+	// Create isolated test product.
+	var productID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+		 VALUES ('Webhook Test Product', 'Test product')
+		 RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	// Create isolated test variant.
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+			product_id,
+			sku,
+			price
+		)
+		VALUES (
+			$1,
+			'webhook-test-' || gen_random_uuid()::text,
+			899900
+		)
+		RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	// Create inventory with one item.
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (
+			variant_id,
+			quantity
+		)
+		VALUES ($1, 1)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	var paymentID pgtype.UUID
+	var paymentIDString string
+
+	// Clean up everything created by this test.
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM outbox_events
+			 WHERE event_type = 'PAYMENT_SUCCEEDED'
+			   AND payload->>'payment_id' = $1`,
+			paymentIDString,
+		)
+		if err != nil {
+			t.Logf("cleanup outbox events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payment_events
+			 WHERE payment_id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payments
+			 WHERE id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM reservations
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservations failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM inventory
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup inventory failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants
+			 WHERE id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup variant failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM products
+			 WHERE id = $1`,
+			productID,
+		)
+		if err != nil {
+			t.Logf("cleanup product failed: %v", err)
+		}
+	})
+
+	expiresAt := pgtype.Timestamptz{
+		Time:  time.Now().Add(10 * time.Minute),
+		Valid: true,
+	}
+
+	// Create an ACTIVE reservation.
+	createdReservation, err := reservationService.CreateReservation(
+		ctx,
+		variantID,
+		1,
+		expiresAt,
+	)
+	if err != nil {
+		t.Fatalf("create test reservation: %v", err)
+	}
+
+	// Create a PENDING payment.
+	payment, err := service.CreatePayment(
+		ctx,
+		createdReservation.ID,
+		"mock",
+		899900,
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+
+	paymentID = payment.ID
+	paymentIDString = paymentID.String()
+
+	if payment.Status != "PENDING" {
+		t.Fatalf(
+			"expected payment status PENDING, got %s",
+			payment.Status,
+		)
+	}
+
+	eventID := fmt.Sprintf(
+		"webhook-test-%d",
+		time.Now().UnixNano(),
+	)
+
+	webhook := PaymentWebhook{
+		EventID:   eventID,
+		EventType: "payment.succeeded",
+		PaymentID: payment.ID,
+	}
+
+	// Process the webhook.
+	updatedPayment, err := service.ProcessPaymentWebhook(
+		ctx,
+		webhook,
+	)
+	if err != nil {
+		t.Fatalf("process payment webhook: %v", err)
+	}
+
+	// Payment should now be SUCCEEDED.
+	if updatedPayment.Status != "SUCCEEDED" {
+		t.Fatalf(
+			"expected payment status SUCCEEDED, got %s",
+			updatedPayment.Status,
+		)
+	}
+
+	// Reservation should now be CONFIRMED.
+	var reservationStatus string
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM reservations
+		 WHERE id = $1`,
+		createdReservation.ID,
+	).Scan(&reservationStatus)
+	if err != nil {
+		t.Fatalf("query reservation status: %v", err)
+	}
+
+	if reservationStatus != "CONFIRMED" {
+		t.Fatalf(
+			"expected reservation status CONFIRMED, got %s",
+			reservationStatus,
+		)
+	}
+
+	// Payment event should have been recorded.
+	var paymentEventCount int
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM payment_events
+		 WHERE event_id = $1`,
+		eventID,
+	).Scan(&paymentEventCount)
+	if err != nil {
+		t.Fatalf("query payment event: %v", err)
+	}
+
+	if paymentEventCount != 1 {
+		t.Fatalf(
+			"expected 1 payment event, got %d",
+			paymentEventCount,
+		)
+	}
+
+	// Outbox event should have been created.
+	var outboxCount int
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM outbox_events
+		 WHERE event_type = 'PAYMENT_SUCCEEDED'
+		   AND payload->>'payment_id' = $1`,
+		paymentIDString,
+	).Scan(&outboxCount)
+	if err != nil {
+		t.Fatalf("query outbox event: %v", err)
+	}
+
+	if outboxCount != 1 {
+		t.Fatalf(
+			"expected 1 PAYMENT_SUCCEEDED outbox event, got %d",
+			outboxCount,
+		)
+	}
+
+	// Send the exact same webhook again.
+	_, err = service.ProcessPaymentWebhook(
+		ctx,
+		webhook,
+	)
+
+	if !errors.Is(err, ErrDuplicateWebhook) {
+		t.Fatalf(
+			"expected ErrDuplicateWebhook, got %v",
+			err,
+		)
+	}
+
+	// The duplicate webhook must not create another outbox event.
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM outbox_events
+		 WHERE event_type = 'PAYMENT_SUCCEEDED'
+		   AND payload->>'payment_id' = $1`,
+		paymentIDString,
+	).Scan(&outboxCount)
+	if err != nil {
+		t.Fatalf("query outbox event after duplicate: %v", err)
+	}
+
+	if outboxCount != 1 {
+		t.Fatalf(
+			"expected exactly 1 outbox event after duplicate webhook, got %d",
+			outboxCount,
+		)
+	}
+}
+
+func TestProcessPaymentWebhookRollback(t *testing.T) {
+	err := godotenv.Load("../../.env")
+	if err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+	provider := NewMockProvider()
+
+	service := NewService(
+		pool,
+		queries,
+		provider,
+	)
+
+	reservationService := reservation.NewService(pool, queries)
+
+	// Create isolated test product.
+	var productID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+		 VALUES ('Webhook Rollback Test Product', 'Test product')
+		 RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	// Create isolated test variant.
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+			product_id,
+			sku,
+			price
+		)
+		VALUES (
+			$1,
+			'webhook-rollback-' || gen_random_uuid()::text,
+			899900
+		)
+		RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	// Create inventory.
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (
+			variant_id,
+			quantity
+		)
+		VALUES ($1, 1)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	var paymentID pgtype.UUID
+
+	// Clean up everything created by this test.
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM outbox_events
+			 WHERE event_type = 'PAYMENT_SUCCEEDED'
+			   AND payload->>'payment_id' = $1`,
+			paymentID.String(),
+		)
+		if err != nil {
+			t.Logf("cleanup outbox events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payment_events
+			 WHERE payment_id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payments
+			 WHERE id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM reservations
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservations failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM inventory
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup inventory failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants
+			 WHERE id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup variant failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM products
+			 WHERE id = $1`,
+			productID,
+		)
+		if err != nil {
+			t.Logf("cleanup product failed: %v", err)
+		}
+	})
+
+	// Create a reservation that will be expired.
+	expiresAt := pgtype.Timestamptz{
+		Time:  time.Now().Add(-10 * time.Minute),
+		Valid: true,
+	}
+
+	createdReservation, err := reservationService.CreateReservation(
+		ctx,
+		variantID,
+		1,
+		expiresAt,
+	)
+	if err != nil {
+		t.Fatalf("create test reservation: %v", err)
+	}
+
+	// Create a PENDING payment.
+	payment, err := service.CreatePayment(
+		ctx,
+		createdReservation.ID,
+		"mock",
+		899900,
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create payment: %v", err)
+	}
+
+	paymentID = payment.ID
+
+	eventID := fmt.Sprintf(
+		"rollback-test-%d",
+		time.Now().UnixNano(),
+	)
+
+	webhook := PaymentWebhook{
+		EventID:   eventID,
+		EventType: "payment.succeeded",
+		PaymentID: payment.ID,
+	}
+
+	// The webhook must fail because the reservation is expired.
+	_, err = service.ProcessPaymentWebhook(ctx, webhook)
+	if err == nil {
+		t.Fatal("expected webhook processing to fail")
+	}
+
+	t.Logf("webhook failed as expected: %v", err)
+
+	// Payment must remain PENDING because the transaction rolled back.
+	var paymentStatus string
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM payments
+		 WHERE id = $1`,
+		payment.ID,
+	).Scan(&paymentStatus)
+	if err != nil {
+		t.Fatalf("query payment status: %v", err)
+	}
+
+	if paymentStatus != "PENDING" {
+		t.Fatalf(
+			"expected payment status PENDING after rollback, got %s",
+			paymentStatus,
+		)
+	}
+
+	// Payment event must not exist because its insert was rolled back.
+	var paymentEventCount int
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM payment_events
+		 WHERE event_id = $1`,
+		eventID,
+	).Scan(&paymentEventCount)
+	if err != nil {
+		t.Fatalf("query payment event: %v", err)
+	}
+
+	if paymentEventCount != 0 {
+		t.Fatalf(
+			"expected 0 payment events after rollback, got %d",
+			paymentEventCount,
+		)
+	}
+
+	// Outbox event must not exist because its insert was rolled back.
+	var outboxCount int
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM outbox_events
+		 WHERE event_type = 'PAYMENT_SUCCEEDED'
+			   AND payload->>'payment_id' = $1`,
+		payment.ID.String(),
+	).Scan(&outboxCount)
+	if err != nil {
+		t.Fatalf("query outbox event: %v", err)
+	}
+
+	if outboxCount != 0 {
+		t.Fatalf(
+			"expected 0 outbox events after rollback, got %d",
+			outboxCount,
+		)
+	}
 }
