@@ -5,6 +5,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -51,6 +54,12 @@ func main() {
 
 	router := gin.New()
 
+	router.Use(
+		gin.Recovery(),
+		apphttp.RequestIDMiddleware(),
+		apphttp.LoggingMiddleware(),
+	)
+
 	api := router.Group("/api/v1")
 
 	api.POST(
@@ -59,14 +68,44 @@ func main() {
 	)
 
 	server := &http.Server{
-		Addr:    ":8080",
-		Handler: router,
+		Addr:              ":8080",
+		Handler:           router,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      10 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
-	log.Println("HTTP server listening on :8080")
+	signalCtx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
 
-	err = server.ListenAndServe()
-	if err != nil && err != http.ErrServerClosed {
-		log.Fatal("HTTP server failed:", err)
+	go func() {
+		log.Println("HTTP server listening on :8080")
+
+		err := server.ListenAndServe()
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal("HTTP server failed:", err)
+		}
+	}()
+
+	<-signalCtx.Done()
+
+	log.Println("Shutdown signal received")
+
+	shutdownCtx, cancel := context.WithTimeout(
+		context.Background(),
+		10*time.Second,
+	)
+	defer cancel()
+
+	err = server.Shutdown(shutdownCtx)
+	if err != nil {
+		log.Fatal("HTTP server shutdown failed:", err)
 	}
+
+	log.Println("HTTP server shutdown completed")
 }

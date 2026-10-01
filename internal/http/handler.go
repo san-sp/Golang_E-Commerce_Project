@@ -21,6 +21,14 @@ func NewHandler(
 	}
 }
 
+func writeInternalServerError(c *gin.Context) {
+	c.JSON(
+		http.StatusInternalServerError,
+		gin.H{
+			"error": "internal server error",
+		},
+	)
+}
 func (h *Handler) PaymentWebhook(c *gin.Context) {
 	var webhook payment.PaymentWebhook
 
@@ -50,12 +58,7 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 			return
 		}
 
-		c.JSON(
-			http.StatusInternalServerError,
-			gin.H{
-				"error": err.Error(),
-			},
-		)
+		writeInternalServerError(c)
 		return
 	}
 

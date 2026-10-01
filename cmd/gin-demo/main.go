@@ -22,12 +22,22 @@ func contextMiddleware() gin.HandlerFunc {
 	}
 }
 
+func panicHandler(c *gin.Context) {
+	panic("intentional demo panic")
+}
+
 func main() {
 	router := gin.New()
+
+	router.Use(
+		gin.Recovery(),
+	)
 
 	api := router.Group("/api/v1")
 
 	api.Use(contextMiddleware())
+
+	router.GET("/panic", panicHandler)
 
 	api.GET("/payments", func(c *gin.Context) {
 		userID, exists := c.Get("user_id")
