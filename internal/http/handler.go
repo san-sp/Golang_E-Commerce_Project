@@ -23,36 +23,27 @@ func NewHandler(
 	}
 }
 
-func writeInternalServerError(c *gin.Context) {
-	c.JSON(
-		http.StatusInternalServerError,
-		gin.H{
-			"error": "internal server error",
-		},
-	)
-}
-
 func (h *Handler) PaymentWebhook(c *gin.Context) {
 	var request PaymentWebhookRequest
 
 	err := c.ShouldBindJSON(&request)
 	if err != nil {
-		c.JSON(
+		writeError(
+			c,
 			http.StatusBadRequest,
-			gin.H{
-				"error": "invalid request",
-			},
+			"INVALID_REQUEST",
+			"invalid request",
 		)
 		return
 	}
 
 	paymentID, err := uuid.Parse(request.PaymentID)
 	if err != nil {
-		c.JSON(
+		writeError(
+			c,
 			http.StatusBadRequest,
-			gin.H{
-				"error": "invalid payment_id",
-			},
+			"INVALID_PAYMENT_ID",
+			"invalid payment_id",
 		)
 		return
 	}
@@ -72,23 +63,26 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 	)
 	if err != nil {
 		if errors.Is(err, payment.ErrDuplicateWebhook) {
-			c.JSON(
+			writeMessage(
+				c,
 				http.StatusOK,
-				gin.H{
-					"message": "payment webhook already processed",
-				},
+				"payment webhook already processed",
 			)
 			return
 		}
 
-		writeInternalServerError(c)
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"INTERNAL_ERROR",
+			"internal server error",
+		)
 		return
 	}
 
-	c.JSON(
+	writeMessage(
+		c,
 		http.StatusOK,
-		gin.H{
-			"message": "payment webhook processed",
-		},
+		"payment webhook processed",
 	)
 }
