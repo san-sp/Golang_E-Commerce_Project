@@ -5,6 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 )
@@ -29,18 +31,39 @@ func writeInternalServerError(c *gin.Context) {
 		},
 	)
 }
-func (h *Handler) PaymentWebhook(c *gin.Context) {
-	var webhook payment.PaymentWebhook
 
-	err := c.ShouldBindJSON(&webhook)
+func (h *Handler) PaymentWebhook(c *gin.Context) {
+	var request PaymentWebhookRequest
+
+	err := c.ShouldBindJSON(&request)
 	if err != nil {
 		c.JSON(
 			http.StatusBadRequest,
 			gin.H{
-				"error": "invalid JSON",
+				"error": "invalid request",
 			},
 		)
 		return
+	}
+
+	paymentID, err := uuid.Parse(request.PaymentID)
+	if err != nil {
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{
+				"error": "invalid payment_id",
+			},
+		)
+		return
+	}
+
+	webhook := payment.PaymentWebhook{
+		EventID:   request.EventID,
+		EventType: request.EventType,
+		PaymentID: pgtype.UUID{
+			Bytes: paymentID,
+			Valid: true,
+		},
 	}
 
 	_, err = h.paymentService.ProcessPaymentWebhook(
