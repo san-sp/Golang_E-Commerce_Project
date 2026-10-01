@@ -174,6 +174,10 @@ func (s *Service) ProcessPaymentWebhook(
 		payment.ReservationID,
 	)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Payment{}, ErrReservationExpired
+		}
+
 		return db.Payment{}, fmt.Errorf(
 			"confirm reservation: %w",
 			err,

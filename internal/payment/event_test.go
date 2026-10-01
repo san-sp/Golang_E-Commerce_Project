@@ -663,7 +663,7 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 	}
 
 	// Create a PENDING payment.
-	payment, err := service.CreatePayment(
+	createdPayment, err := service.CreatePayment(
 		ctx,
 		createdReservation.ID,
 		"mock",
@@ -674,7 +674,7 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 		t.Fatalf("create payment: %v", err)
 	}
 
-	paymentID = payment.ID
+	paymentID = createdPayment.ID
 
 	eventID := fmt.Sprintf(
 		"rollback-test-%d",
@@ -684,13 +684,20 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 	webhook := PaymentWebhook{
 		EventID:   eventID,
 		EventType: "payment.succeeded",
-		PaymentID: payment.ID,
+		PaymentID: createdPayment.ID,
 	}
 
 	// The webhook must fail because the reservation is expired.
 	_, err = service.ProcessPaymentWebhook(ctx, webhook)
 	if err == nil {
 		t.Fatal("expected webhook processing to fail")
+	}
+
+	if !errors.Is(err, ErrReservationExpired) {
+		t.Fatalf(
+			"expected ErrReservationExpired, got %v",
+			err,
+		)
 	}
 
 	t.Logf("webhook failed as expected: %v", err)
@@ -703,7 +710,7 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 		`SELECT status
 		 FROM payments
 		 WHERE id = $1`,
-		payment.ID,
+		createdPayment.ID,
 	).Scan(&paymentStatus)
 	if err != nil {
 		t.Fatalf("query payment status: %v", err)
@@ -746,7 +753,7 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 		 FROM outbox_events
 		 WHERE event_type = 'PAYMENT_SUCCEEDED'
 			   AND payload->>'payment_id' = $1`,
-		payment.ID.String(),
+		createdPayment.ID.String(),
 	).Scan(&outboxCount)
 	if err != nil {
 		t.Fatalf("query outbox event: %v", err)

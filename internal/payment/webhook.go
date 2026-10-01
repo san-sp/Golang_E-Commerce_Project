@@ -6,7 +6,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-var ErrDuplicateWebhook = errors.New("payment webhook already processed")
+var (
+	ErrDuplicateWebhook   = errors.New("payment webhook already processed")
+	ErrReservationExpired = errors.New("reservation expired")
+)
 
 type PaymentWebhook struct {
 	EventID   string      `json:"event_id"`
