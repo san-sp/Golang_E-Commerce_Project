@@ -71,10 +71,13 @@ func main() {
 		return
 	}
 
-	if publisher == nil {
-		fmt.Println("Publisher was not created")
+	err = messaging.SetupTopology(rabbitChannel)
+	if err != nil {
+		fmt.Println("Failed to setup RabbitMQ topology:", err)
 		return
 	}
+
+	fmt.Println("RabbitMQ topology ready")
 
 	fmt.Println("Connected to RabbitMQ")
 
