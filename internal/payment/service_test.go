@@ -114,14 +114,12 @@ func TestCreatePayment(t *testing.T) {
 		t.Fatal("expected provider payment ID to be set")
 	}
 
-	expectedProviderPaymentID := "mock_payment_899900"
+	if !payment.ProviderPaymentID.Valid {
+		t.Fatal("expected provider payment ID to be valid")
+	}
 
-	if payment.ProviderPaymentID.String != expectedProviderPaymentID {
-		t.Fatalf(
-			"expected provider payment ID %s, got %s",
-			expectedProviderPaymentID,
-			payment.ProviderPaymentID.String,
-		)
+	if payment.ProviderPaymentID.String == "" {
+		t.Fatal("expected provider payment ID to be non-empty")
 	}
 
 	if payment.Amount != 899900 {
@@ -483,11 +481,12 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		t.Fatal("expected provider payment ID to be present")
 	}
 
-	if updatedPayment.ProviderPaymentID.String != "mock_payment_899900" {
-		t.Fatalf(
-			"expected provider payment ID mock_payment_899900, got %s",
-			updatedPayment.ProviderPaymentID.String,
-		)
+	if !updatedPayment.ProviderPaymentID.Valid {
+		t.Fatal("expected provider payment ID to be valid")
+	}
+
+	if updatedPayment.ProviderPaymentID.String == "" {
+		t.Fatal("expected provider payment ID to be non-empty")
 	}
 
 	_, err = service.MarkPaymentSucceeded(

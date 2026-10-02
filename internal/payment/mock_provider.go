@@ -2,7 +2,8 @@ package payment
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/google/uuid"
 )
 
 type MockProvider struct {
@@ -33,10 +34,9 @@ func (m *MockProvider) CreatePayment(
 	switch m.failureMode {
 	case "failed":
 		return "", ErrProviderFailed
-
 	case "unknown":
 		return "", ErrProviderUnknown
 	}
 
-	return fmt.Sprintf("mock_payment_%d", amount), nil
+	return "mock_payment_" + uuid.NewString(), nil
 }
