@@ -63,6 +63,11 @@ func main() {
 	api := router.Group("/api/v1")
 
 	api.POST(
+		"/payments",
+		handler.CreatePayment,
+	)
+
+	api.POST(
 		"/payments/webhook",
 		handler.PaymentWebhook,
 	)

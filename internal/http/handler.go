@@ -96,3 +96,62 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 		"payment webhook processed",
 	)
 }
+
+func (h *Handler) CreatePayment(c *gin.Context) {
+	var request CreatePaymentRequest
+
+	err := c.ShouldBindJSON(&request)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_REQUEST",
+			"invalid request",
+		)
+		return
+	}
+
+	reservationID, err := uuid.Parse(request.ReservationID)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_RESERVATION_ID",
+			"invalid reservation_id",
+		)
+		return
+	}
+
+	payment, err := h.paymentService.CreatePayment(
+		c.Request.Context(),
+		pgtype.UUID{
+			Bytes: reservationID,
+			Valid: true,
+		},
+		request.Provider,
+		request.Amount,
+		request.Currency,
+	)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"PAYMENT_CREATION_FAILED",
+			"payment creation failed",
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusCreated,
+		gin.H{
+			"id":                  payment.ID,
+			"status":              payment.Status,
+			"reservation_id":      payment.ReservationID,
+			"provider":            payment.Provider,
+			"provider_payment_id": payment.ProviderPaymentID,
+			"amount":              payment.Amount,
+			"currency":            payment.Currency,
+		},
+	)
+}
