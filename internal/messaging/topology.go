@@ -149,6 +149,24 @@ func SetupTopology(channel *amqp091.Channel) error {
 		)
 	}
 
+	_, err = channel.QueueDeclare(
+		"payment-events",
+		true,
+		false,
+		false,
+		false,
+		amqp091.Table{
+			"x-dead-letter-exchange":    "payment-dlx",
+			"x-dead-letter-routing-key": "payment.dead",
+		},
+	)
+	if err != nil {
+		return fmt.Errorf(
+			"declare payment-events queue: %w",
+			err,
+		)
+	}
+
 	err = channel.QueueBind(
 		"payment-events",
 		"payment.retry",
