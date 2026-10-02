@@ -71,6 +71,16 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 			return
 		}
 
+		if errors.Is(err, payment.ErrReservationExpired) {
+			writeError(
+				c,
+				http.StatusConflict,
+				"RESERVATION_EXPIRED",
+				"reservation expired",
+			)
+			return
+		}
+
 		writeError(
 			c,
 			http.StatusInternalServerError,
