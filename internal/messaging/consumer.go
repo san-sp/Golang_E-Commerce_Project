@@ -1,6 +1,8 @@
 package messaging
 
 import (
+	"fmt"
+
 	"github.com/rabbitmq/amqp091-go"
 )
 
@@ -49,6 +51,20 @@ func (c *Consumer) Consume(queueName string) (<-chan amqp091.Delivery, error) {
 	)
 }
 
+func validateHandlerResult(
+	result ProcessingResult,
+	err error,
+) error {
+	if result == ProcessingSuccess && err != nil {
+		return fmt.Errorf(
+			"handler returned success with error: %w",
+			err,
+		)
+	}
+
+	return nil
+}
+
 func (c *Consumer) Start(
 	queueName string,
 	handler MessageHandler,
@@ -63,8 +79,12 @@ func (c *Consumer) Start(
 	for message := range messages {
 		result, err := handler(message)
 
+		if err := validateHandlerResult(result, err); err != nil {
+			return err
+		}
+
 		if err != nil {
-			println("Message processing error:", err.Error())
+			fmt.Println("Message processing error:", err)
 		}
 
 		switch result {

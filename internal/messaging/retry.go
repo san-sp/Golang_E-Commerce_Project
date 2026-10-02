@@ -11,7 +11,7 @@ type RetryPolicy struct {
 	maxRetries      int
 	retryExchange   string
 	retryRoutingKey string
-	dqlExchange     string
+	dlqExchange     string
 	dlqRoutingKey   string
 }
 
@@ -28,7 +28,7 @@ func NewRetryPolicy(
 		maxRetries:      maxRetries,
 		retryExchange:   retryExchange,
 		retryRoutingKey: retryRoutingKey,
-		dqlExchange:     dlqExchange,
+		dlqExchange:     dlqExchange,
 		dlqRoutingKey:   dlqRoutingKey,
 	}
 }
@@ -40,7 +40,7 @@ func (r *RetryPolicy) Handle(message amqp091.Delivery) error {
 		count, ok := value.(int32)
 
 		if !ok {
-			return fmt.Errorf("ivalid retry-count header type: %T", value)
+			return fmt.Errorf("invalid retry-count header type: %T", value)
 		}
 
 		retryCount = int(count)
@@ -48,7 +48,7 @@ func (r *RetryPolicy) Handle(message amqp091.Delivery) error {
 
 	if retryCount >= r.maxRetries {
 		return r.publisher.Publish(
-			r.dqlExchange,
+			r.dlqExchange,
 			r.dlqRoutingKey,
 			amqp091.Publishing{
 				ContentType:  message.ContentType,

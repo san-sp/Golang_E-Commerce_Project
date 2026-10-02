@@ -59,6 +59,21 @@ func main() {
 
 	fmt.Println("Consumer QoS configured")
 
+	publisher, err := messaging.NewPublisher(rabbitChannel)
+	if err != nil {
+		fmt.Println("Failed to create RabbitMQ publisher:", err)
+		return
+	}
+
+	retryPolicy := messaging.NewRetryPolicy(
+		publisher,
+		3,
+		"payment-retry-exchange",
+		"payment.retry",
+		"payment-dlx",
+		"payment.dead",
+	)
+
 	handler := func(message amqp091.Delivery) (
 		messaging.ProcessingResult,
 		error,
@@ -85,7 +100,7 @@ func main() {
 	err = consumer.Start(
 		"payment-events",
 		handler,
-		nil,
+		retryPolicy.Handle,
 	)
 	if err != nil {
 		fmt.Println("Consumer stopped:", err)
