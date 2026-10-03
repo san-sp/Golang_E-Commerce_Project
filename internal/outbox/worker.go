@@ -139,6 +139,7 @@ func (w *Worker) process(ctx context.Context) error {
 			amqp091.Publishing{
 				ContentType:  "application/json",
 				DeliveryMode: amqp091.Persistent,
+				MessageId:    event.ID.String(),
 				Body:         event.Payload,
 			},
 		)

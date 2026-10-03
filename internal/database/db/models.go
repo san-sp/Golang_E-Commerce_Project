@@ -8,6 +8,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type ConsumerEvent struct {
+	ID           pgtype.UUID
+	ConsumerName string
+	EventID      pgtype.UUID
+	ProcessedAt  pgtype.Timestamptz
+}
+
 type Inventory struct {
 	ID        pgtype.UUID
 	VariantID pgtype.UUID
@@ -46,6 +53,12 @@ type PaymentEvent struct {
 	PaymentID pgtype.UUID
 	EventType string
 	CreatedAt pgtype.Timestamptz
+}
+
+type PaymentProcessing struct {
+	ID          pgtype.UUID
+	PaymentID   pgtype.UUID
+	ProcessedAt pgtype.Timestamptz
 }
 
 type Product struct {
