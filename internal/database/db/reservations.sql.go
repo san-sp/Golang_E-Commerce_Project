@@ -100,6 +100,97 @@ func (q *Queries) CreateReservation(ctx context.Context, arg CreateReservationPa
 	return i, err
 }
 
+const expireExpiredReservations = `-- name: ExpireExpiredReservations :many
+WITH expired AS (
+    SELECT id
+    FROM reservations
+    WHERE status = 'ACTIVE'
+      AND expires_at <= NOW()
+    ORDER BY expires_at
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE reservations AS r
+SET
+    status = 'EXPIRED',
+    updated_at = NOW()
+FROM expired
+WHERE r.id = expired.id
+RETURNING
+    r.id,
+    r.variant_id,
+    r.order_id,
+    r.quantity,
+    r.status,
+    r.expires_at,
+    r.created_at,
+    r.updated_at
+`
+
+func (q *Queries) ExpireExpiredReservations(ctx context.Context, limit int32) ([]Reservation, error) {
+	rows, err := q.db.Query(ctx, expireExpiredReservations, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Reservation
+	for rows.Next() {
+		var i Reservation
+		if err := rows.Scan(
+			&i.ID,
+			&i.VariantID,
+			&i.OrderID,
+			&i.Quantity,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const expireReservation = `-- name: ExpireReservation :one
+UPDATE reservations
+SET
+    status = 'EXPIRED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+  AND expires_at <= NOW()
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) ExpireReservation(ctx context.Context, id pgtype.UUID) (Reservation, error) {
+	row := q.db.QueryRow(ctx, expireReservation, id)
+	var i Reservation
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.OrderID,
+		&i.Quantity,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getActiveReservedQuantity = `-- name: GetActiveReservedQuantity :one
 SELECT
     COALESCE(SUM(quantity), 0)::BIGINT AS reserved_quantity
@@ -135,6 +226,36 @@ func (q *Queries) GetInventoryForUpdate(ctx context.Context, variantID pgtype.UU
 		&i.ID,
 		&i.VariantID,
 		&i.Quantity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getReservation = `-- name: GetReservation :one
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE id = $1
+`
+
+func (q *Queries) GetReservation(ctx context.Context, id pgtype.UUID) (Reservation, error) {
+	row := q.db.QueryRow(ctx, getReservation, id)
+	var i Reservation
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.OrderID,
+		&i.Quantity,
+		&i.Status,
+		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

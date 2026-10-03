@@ -103,3 +103,100 @@ func TestCreateReservation(t *testing.T) {
 		}
 	})
 }
+
+func TestExpireReservation(t *testing.T) {
+	err := godotenv.Load("../../.env")
+	if err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+
+	variantID := pgtype.UUID{
+		Bytes: [16]byte{
+			0xc5, 0x17, 0x4f, 0x98,
+			0x5b, 0xa2, 0x45, 0x3e,
+			0x92, 0xfb, 0x26, 0x6e,
+			0x81, 0x8f, 0xbd, 0x92,
+		},
+		Valid: true,
+	}
+
+	expiredReservation, err := queries.CreateReservation(ctx, db.CreateReservationParams{
+		VariantID: variantID,
+		Quantity:  1,
+		ExpiresAt: pgtype.Timestamptz{
+			Time:  time.Now().Add(-1 * time.Minute),
+			Valid: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create expired reservation: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			expiredReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup expired reservation failed: %v", err)
+		}
+	})
+
+	expired, err := queries.ExpireReservation(ctx, expiredReservation.ID)
+	if err != nil {
+		t.Fatalf("expire reservation: %v", err)
+	}
+
+	if expired.Status != "EXPIRED" {
+		t.Fatalf(
+			"expected reservation status EXPIRED, got %s",
+			expired.Status,
+		)
+	}
+
+	futureReservation, err := queries.CreateReservation(ctx, db.CreateReservationParams{
+		VariantID: variantID,
+		Quantity:  1,
+		ExpiresAt: pgtype.Timestamptz{
+			Time:  time.Now().Add(10 * time.Minute),
+			Valid: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("create future reservation: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			futureReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup future reservation failed: %v", err)
+		}
+	})
+
+	_, err = queries.ExpireReservation(ctx, futureReservation.ID)
+	if err == nil {
+		t.Fatal("expected future reservation to remain ACTIVE, got nil")
+	}
+}

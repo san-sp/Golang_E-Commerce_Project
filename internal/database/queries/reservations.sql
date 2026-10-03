@@ -60,4 +60,62 @@ RETURNING
     status,
     expires_at,
     created_at,
-    updated_at;  
+    updated_at;
+
+-- name: ExpireReservation :one
+UPDATE reservations
+SET
+    status = 'EXPIRED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+  AND expires_at <= NOW()
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at;
+
+-- name: ExpireExpiredReservations :many
+WITH expired AS (
+    SELECT id
+    FROM reservations
+    WHERE status = 'ACTIVE'
+      AND expires_at <= NOW()
+    ORDER BY expires_at
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+UPDATE reservations AS r
+SET
+    status = 'EXPIRED',
+    updated_at = NOW()
+FROM expired
+WHERE r.id = expired.id
+RETURNING
+    r.id,
+    r.variant_id,
+    r.order_id,
+    r.quantity,
+    r.status,
+    r.expires_at,
+    r.created_at,
+    r.updated_at;
+
+-- name: GetReservation :one
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE id = $1;
+
