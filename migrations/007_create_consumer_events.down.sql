@@ -1,0 +1,1 @@
+DROP TABLE consumer_events;
