@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/joho/godotenv"
 
@@ -93,16 +94,58 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 	}
 
 	eventID := pgtype.UUID{
-		Bytes: [16]byte{
-			0x11, 0x11, 0x11, 0x11,
-			0x11, 0x11, 0x11, 0x11,
-			0x11, 0x11, 0x11, 0x11,
-			0x11, 0x11, 0x11, 0x11,
-		},
+		Bytes: uuid.New(),
 		Valid: true,
 	}
 
 	consumerName := "payment-consumer"
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			"DELETE FROM payment_processing WHERE payment_id = $1",
+			payment.ID,
+		)
+		if err != nil {
+			t.Logf(
+				"cleanup payment processing failed: %v",
+				err,
+			)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM consumer_events
+         WHERE consumer_name = $1
+           AND event_id = $2`,
+			consumerName,
+			eventID,
+		)
+		if err != nil {
+			t.Logf(
+				"cleanup consumer event failed: %v",
+				err,
+			)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM payments WHERE id = $1",
+			payment.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
+		}
+	})
 
 	err = consumerService.ProcessPaymentSucceeded(
 		ctx,
@@ -157,53 +200,6 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 			processingCount,
 		)
 	}
-
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM payment_processing WHERE payment_id = $1",
-			payment.ID,
-		)
-		if err != nil {
-			t.Logf(
-				"cleanup payment processing failed: %v",
-				err,
-			)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			`DELETE FROM consumer_events
-			 WHERE consumer_name = $1
-			   AND event_id = $2`,
-			consumerName,
-			eventID,
-		)
-		if err != nil {
-			t.Logf(
-				"cleanup consumer event failed: %v",
-				err,
-			)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			"DELETE FROM payments WHERE id = $1",
-			payment.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup payment failed: %v", err)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			createdReservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup reservation failed: %v", err)
-		}
-	})
 }
 
 func TestProcessPaymentSucceededDuplicate(t *testing.T) {
@@ -284,16 +280,58 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 	}
 
 	eventID := pgtype.UUID{
-		Bytes: [16]byte{
-			0x22, 0x22, 0x22, 0x22,
-			0x22, 0x22, 0x22, 0x22,
-			0x22, 0x22, 0x22, 0x22,
-			0x22, 0x22, 0x22, 0x22,
-		},
+		Bytes: uuid.New(),
 		Valid: true,
 	}
 
 	consumerName := "payment-consumer"
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			"DELETE FROM payment_processing WHERE payment_id = $1",
+			payment.ID,
+		)
+		if err != nil {
+			t.Logf(
+				"cleanup payment processing failed: %v",
+				err,
+			)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM consumer_events
+         WHERE consumer_name = $1
+           AND event_id = $2`,
+			consumerName,
+			eventID,
+		)
+		if err != nil {
+			t.Logf(
+				"cleanup consumer event failed: %v",
+				err,
+			)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM payments WHERE id = $1",
+			payment.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM reservations WHERE id = $1",
+			createdReservation.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservation failed: %v", err)
+		}
+	})
 
 	err = consumerService.ProcessPaymentSucceeded(
 		ctx,
@@ -361,53 +399,6 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 			processingCount,
 		)
 	}
-
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM payment_processing WHERE payment_id = $1",
-			payment.ID,
-		)
-		if err != nil {
-			t.Logf(
-				"cleanup payment processing failed: %v",
-				err,
-			)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			`DELETE FROM consumer_events
-			 WHERE consumer_name = $1
-			   AND event_id = $2`,
-			consumerName,
-			eventID,
-		)
-		if err != nil {
-			t.Logf(
-				"cleanup consumer event failed: %v",
-				err,
-			)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			"DELETE FROM payments WHERE id = $1",
-			payment.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup payment failed: %v", err)
-		}
-
-		_, err = pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			createdReservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup reservation failed: %v", err)
-		}
-	})
 }
 
 func TestProcessPaymentSucceededRollback(t *testing.T) {
@@ -440,12 +431,7 @@ func TestProcessPaymentSucceededRollback(t *testing.T) {
 	)
 
 	eventID := pgtype.UUID{
-		Bytes: [16]byte{
-			0x33, 0x33, 0x33, 0x33,
-			0x33, 0x33, 0x33, 0x33,
-			0x33, 0x33, 0x33, 0x33,
-			0x33, 0x33, 0x33, 0x33,
-		},
+		Bytes: uuid.New(),
 		Valid: true,
 	}
 
