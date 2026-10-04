@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	apphttp "github.com/san-sp/Golang_E-Commerce_Project/internal/http"
@@ -57,9 +58,14 @@ func main() {
 		15*time.Minute,
 	)
 
+	cartService := cart.NewService(
+		queries,
+	)
+
 	handler := apphttp.NewHandler(
 		paymentService,
 		reservationService,
+		cartService,
 	)
 
 	router := gin.New()
@@ -85,6 +91,31 @@ func main() {
 	api.POST(
 		"/payments/webhook",
 		handler.PaymentWebhook,
+	)
+
+	api.POST(
+		"/carts",
+		handler.CreateCart,
+	)
+
+	api.GET(
+		"/carts/:id",
+		handler.GetCart,
+	)
+
+	api.POST(
+		"/carts/:id/items",
+		handler.AddCartItem,
+	)
+
+	api.PATCH(
+		"/carts/:id/items/:variant_id",
+		handler.UpdateCartItem,
+	)
+
+	api.DELETE(
+		"/carts/:id/items/:variant_id",
+		handler.RemoveCartItem,
 	)
 
 	server := &http.Server{

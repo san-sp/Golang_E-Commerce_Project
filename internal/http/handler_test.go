@@ -50,6 +50,7 @@ func TestCreateReservationHandler(t *testing.T) {
 	handler := NewHandler(
 		nil,
 		reservationService,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -176,6 +177,7 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 	handler := NewHandler(
 		nil,
 		reservationService,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
