@@ -39,6 +39,25 @@ type Inventory struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type Order struct {
+	ID          pgtype.UUID
+	Status      string
+	TotalAmount int64
+	Currency    string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type OrderItem struct {
+	ID        pgtype.UUID
+	OrderID   pgtype.UUID
+	VariantID pgtype.UUID
+	Quantity  int64
+	UnitPrice int64
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type OutboxEvent struct {
 	ID              pgtype.UUID
 	EventType       string

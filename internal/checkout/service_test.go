@@ -1,0 +1,300 @@
+package checkout
+
+import (
+	"context"
+	"os"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/joho/godotenv"
+
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
+)
+
+func setupTestService(t *testing.T) (
+	*Service,
+	*db.Queries,
+) {
+	t.Helper()
+
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+
+	orderService := order.NewService(pool, queries)
+
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		30*60*1000000000, // 30 minutes
+	)
+
+	service := NewService(
+		pool,
+		queries,
+		orderService,
+		reservationService,
+	)
+
+	return service, queries
+}
+
+func testVariantID() pgtype.UUID {
+	return pgtype.UUID{
+		Bytes: [16]byte{
+			0xc5, 0x17, 0x4f, 0x98,
+			0x5b, 0xa2, 0x45, 0x3e,
+			0x92, 0xfb, 0x26, 0x6e,
+			0x81, 0x8f, 0xbd, 0x92,
+		},
+		Valid: true,
+	}
+}
+
+func TestCheckoutEmptyCart(t *testing.T) {
+	service, queries := setupTestService(t)
+
+	ctx := context.Background()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = service.Checkout(
+		ctx,
+		cart.ID,
+		"INR",
+	)
+
+	if err != ErrCartEmpty {
+		t.Fatalf(
+			"expected ErrCartEmpty, got %v",
+			err,
+		)
+	}
+}
+
+func TestCheckoutSuccess(t *testing.T) {
+	service, queries := setupTestService(t)
+
+	ctx := context.Background()
+	variantID := testVariantID()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: variantID,
+			Quantity:  2,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	result, err := service.Checkout(
+		ctx,
+		cart.ID,
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			result.Order.ID,
+		)
+	})
+
+	if !result.Order.ID.Valid {
+		t.Fatal("expected order ID to be valid")
+	}
+
+	if result.Order.Status != "PENDING" {
+		t.Fatalf(
+			"expected order status PENDING, got %s",
+			result.Order.Status,
+		)
+	}
+
+	if result.Order.Currency != "INR" {
+		t.Fatalf(
+			"expected currency INR, got %s",
+			result.Order.Currency,
+		)
+	}
+
+	if result.Order.TotalAmount != 1799800 {
+		t.Fatalf(
+			"expected total 1799800, got %d",
+			result.Order.TotalAmount,
+		)
+	}
+
+	if len(result.OrderItems) != 1 {
+		t.Fatalf(
+			"expected 1 order item, got %d",
+			len(result.OrderItems),
+		)
+	}
+
+	if result.OrderItems[0].Quantity != 2 {
+		t.Fatalf(
+			"expected quantity 2, got %d",
+			result.OrderItems[0].Quantity,
+		)
+	}
+
+	if result.OrderItems[0].UnitPrice != 899900 {
+		t.Fatalf(
+			"expected unit price 899900, got %d",
+			result.OrderItems[0].UnitPrice,
+		)
+	}
+
+	if len(result.Reservations) != 1 {
+		t.Fatalf(
+			"expected 1 reservation, got %d",
+			len(result.Reservations),
+		)
+	}
+
+	if result.Reservations[0].Status != "ACTIVE" {
+		t.Fatalf(
+			"expected reservation status ACTIVE, got %s",
+			result.Reservations[0].Status,
+		)
+	}
+
+	if result.Reservations[0].OrderID != result.Order.ID {
+		t.Fatal("expected reservation to reference created order")
+	}
+
+	cartAfterCheckout, err := queries.GetCart(ctx, cart.ID)
+	if err != nil {
+		t.Fatalf("get cart after checkout: %v", err)
+	}
+
+	if cartAfterCheckout.Status != "CONVERTED" {
+		t.Fatalf(
+			"expected cart status CONVERTED, got %s",
+			cartAfterCheckout.Status,
+		)
+	}
+
+}
+
+func TestCheckoutRollsBackOrderWhenReservationFails(t *testing.T) {
+	service, queries := setupTestService(t)
+
+	ctx := context.Background()
+	variantID := testVariantID()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: variantID,
+			Quantity:  999999999,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	currency := "TEST-ROLLBACK"
+
+	_, err = service.Checkout(
+		ctx,
+		cart.ID,
+		currency,
+	)
+	if err == nil {
+		t.Fatal("expected checkout to fail")
+	}
+
+	var orderCount int64
+
+	err = service.pool.QueryRow(
+		ctx,
+		`SELECT COUNT(*)
+		 FROM orders
+		 WHERE currency = $1`,
+		currency,
+	).Scan(&orderCount)
+	if err != nil {
+		t.Fatalf("count orders: %v", err)
+	}
+
+	if orderCount != 0 {
+		t.Fatalf(
+			"expected 0 orders after rollback, got %d",
+			orderCount,
+		)
+	}
+}

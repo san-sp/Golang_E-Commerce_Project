@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -37,8 +38,60 @@ func (s *Service) CreateReservation(
 	variantID pgtype.UUID,
 	quantity int64,
 ) (db.Reservation, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return db.Reservation{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	reservation, err := s.createReservationTx(
+		ctx,
+		s.queries.WithTx(tx),
+		variantID,
+		pgtype.UUID{},
+		quantity,
+	)
+	if err != nil {
+		return db.Reservation{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.Reservation{}, fmt.Errorf(
+			"commit reservation transaction: %w",
+			err,
+		)
+	}
+
+	return reservation, nil
+}
+
+func (s *Service) CreateReservationTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	variantID pgtype.UUID,
+	orderID pgtype.UUID,
+	quantity int64,
+) (db.Reservation, error) {
+	return s.createReservationTx(
+		ctx,
+		s.queries.WithTx(tx),
+		variantID,
+		orderID,
+		quantity,
+	)
+}
+
+func (s *Service) createReservationTx(
+	ctx context.Context,
+	queries *db.Queries,
+	variantID pgtype.UUID,
+	orderID pgtype.UUID,
+	quantity int64,
+) (db.Reservation, error) {
 	if quantity <= 0 {
-		return db.Reservation{}, fmt.Errorf("quantity must be greater than zero")
+		return db.Reservation{}, fmt.Errorf(
+			"quantity must be greater than zero",
+		)
 	}
 
 	expiresAt := pgtype.Timestamptz{
@@ -46,22 +99,23 @@ func (s *Service) CreateReservation(
 		Valid: true,
 	}
 
-	tx, err := s.pool.Begin(ctx)
+	inventory, err := queries.GetInventoryForUpdate(ctx, variantID)
 	if err != nil {
-		return db.Reservation{}, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	txQueries := s.queries.WithTx(tx)
-
-	inventory, err := txQueries.GetInventoryForUpdate(ctx, variantID)
-	if err != nil {
-		return db.Reservation{}, fmt.Errorf("get inventory: %w", err)
+		return db.Reservation{}, fmt.Errorf(
+			"get inventory: %w",
+			err,
+		)
 	}
 
-	reservedQuantity, err := txQueries.GetActiveReservedQuantity(ctx, variantID)
+	reservedQuantity, err := queries.GetActiveReservedQuantity(
+		ctx,
+		variantID,
+	)
 	if err != nil {
-		return db.Reservation{}, fmt.Errorf("get active reserved quantity: %w", err)
+		return db.Reservation{}, fmt.Errorf(
+			"get active reserved quantity: %w",
+			err,
+		)
 	}
 
 	availableQuantity := inventory.Quantity - reservedQuantity
@@ -75,21 +129,20 @@ func (s *Service) CreateReservation(
 		)
 	}
 
-	reservation, err := txQueries.CreateReservation(
+	reservation, err := queries.CreateReservation(
 		ctx,
 		db.CreateReservationParams{
 			VariantID: variantID,
-			OrderID:   pgtype.UUID{},
+			OrderID:   orderID,
 			Quantity:  quantity,
 			ExpiresAt: expiresAt,
 		},
 	)
 	if err != nil {
-		return db.Reservation{}, fmt.Errorf("create reservation: %w", err)
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return db.Reservation{}, fmt.Errorf("commit reservation transaction: %w", err)
+		return db.Reservation{}, fmt.Errorf(
+			"create reservation: %w",
+			err,
+		)
 	}
 
 	return reservation, nil
