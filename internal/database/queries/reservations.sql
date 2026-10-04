@@ -62,6 +62,23 @@ RETURNING
     created_at,
     updated_at;
 
+-- name: CancelReservation :one
+UPDATE reservations
+SET
+    status = 'CANCELLED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at;    
+
 -- name: ExpireReservation :one
 UPDATE reservations
 SET
@@ -119,3 +136,31 @@ SELECT
 FROM reservations
 WHERE id = $1;
 
+-- name: GetActiveReservationsByOrderID :many
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE order_id = $1
+  AND status = 'ACTIVE'
+ORDER BY created_at;
+
+-- name: GetReservationsByOrderID :many
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE order_id = $1
+ORDER BY created_at;

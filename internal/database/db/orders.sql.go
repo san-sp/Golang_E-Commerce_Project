@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelOrder = `-- name: CancelOrder :one
+UPDATE orders
+SET
+    status = 'CANCELLED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'PENDING'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) CancelOrder(ctx context.Context, id pgtype.UUID) (Order, error) {
+	row := q.db.QueryRow(ctx, cancelOrder, id)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.TotalAmount,
+		&i.Currency,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const confirmOrder = `-- name: ConfirmOrder :one
+UPDATE orders
+SET
+    status = 'CONFIRMED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'PENDING'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) ConfirmOrder(ctx context.Context, id pgtype.UUID) (Order, error) {
+	row := q.db.QueryRow(ctx, confirmOrder, id)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.TotalAmount,
+		&i.Currency,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createOrder = `-- name: CreateOrder :one
 INSERT INTO orders (
     status,

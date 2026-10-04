@@ -13,7 +13,7 @@ import (
 
 const createPayment = `-- name: CreatePayment :one
 INSERT INTO payments (
-    reservation_id,
+    order_id,
     provider,
     provider_payment_id,
     amount,
@@ -28,11 +28,11 @@ VALUES (
     $5,
     $6
 )
-RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at
+RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at, order_id
 `
 
 type CreatePaymentParams struct {
-	ReservationID     pgtype.UUID
+	OrderID           pgtype.UUID
 	Provider          string
 	ProviderPaymentID pgtype.Text
 	Amount            int64
@@ -42,7 +42,7 @@ type CreatePaymentParams struct {
 
 func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (Payment, error) {
 	row := q.db.QueryRow(ctx, createPayment,
-		arg.ReservationID,
+		arg.OrderID,
 		arg.Provider,
 		arg.ProviderPaymentID,
 		arg.Amount,
@@ -60,6 +60,7 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrderID,
 	)
 	return i, err
 }
@@ -70,7 +71,7 @@ SET
     status = 'FAILED',
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at
+RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at, order_id
 `
 
 func (q *Queries) MarkPaymentFailed(ctx context.Context, id pgtype.UUID) (Payment, error) {
@@ -86,6 +87,7 @@ func (q *Queries) MarkPaymentFailed(ctx context.Context, id pgtype.UUID) (Paymen
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrderID,
 	)
 	return i, err
 }
@@ -97,7 +99,7 @@ SET
     updated_at = NOW()
 WHERE id = $1
   AND status = 'PENDING'
-RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at
+RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at, order_id
 `
 
 func (q *Queries) MarkPaymentSucceeded(ctx context.Context, id pgtype.UUID) (Payment, error) {
@@ -113,6 +115,7 @@ func (q *Queries) MarkPaymentSucceeded(ctx context.Context, id pgtype.UUID) (Pay
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrderID,
 	)
 	return i, err
 }
@@ -123,7 +126,7 @@ SET
     provider_payment_id = $2,
     updated_at = NOW()
 WHERE id = $1
-RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at
+RETURNING id, reservation_id, provider, provider_payment_id, amount, currency, status, created_at, updated_at, order_id
 `
 
 type UpdatePaymentProviderIDParams struct {
@@ -144,6 +147,7 @@ func (q *Queries) UpdatePaymentProviderID(ctx context.Context, arg UpdatePayment
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OrderID,
 	)
 	return i, err
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -33,7 +34,7 @@ func NewService(
 
 func (s *Service) CreatePayment(
 	ctx context.Context,
-	reservationID pgtype.UUID,
+	orderID pgtype.UUID,
 	provider string,
 	amount int64,
 	currency string,
@@ -41,7 +42,7 @@ func (s *Service) CreatePayment(
 	payment, err := s.queries.CreatePayment(
 		ctx,
 		db.CreatePaymentParams{
-			ReservationID:     reservationID,
+			OrderID:           orderID,
 			Provider:          provider,
 			ProviderPaymentID: pgtype.Text{},
 			Amount:            amount,
@@ -169,26 +170,73 @@ func (s *Service) ProcessPaymentWebhook(
 		)
 	}
 
-	_, err = txQueries.ConfirmReservation(
+	reservations, err := txQueries.GetReservationsByOrderID(
 		ctx,
-		payment.ReservationID,
+		payment.OrderID,
+	)
+	if err != nil {
+		return db.Payment{}, fmt.Errorf(
+			"get order reservations: %w",
+			err,
+		)
+	}
+
+	if len(reservations) == 0 {
+		return db.Payment{}, fmt.Errorf(
+			"no reservations found for order",
+		)
+	}
+
+	now := time.Now()
+
+	for _, reservation := range reservations {
+		if reservation.Status != "ACTIVE" ||
+			!reservation.ExpiresAt.Valid ||
+			!reservation.ExpiresAt.Time.After(now) {
+			return db.Payment{}, ErrReservationExpired
+		}
+	}
+
+	for _, reservation := range reservations {
+		_, err = txQueries.ConfirmReservation(
+			ctx,
+			reservation.ID,
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.Payment{}, ErrReservationExpired
+			}
+
+			return db.Payment{}, fmt.Errorf(
+				"confirm reservation: %w",
+				err,
+			)
+		}
+	}
+
+	_, err = txQueries.ConfirmOrder(
+		ctx,
+		payment.OrderID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Payment{}, ErrReservationExpired
+			return db.Payment{}, fmt.Errorf(
+				"confirm order: %w",
+				err,
+			)
 		}
 
 		return db.Payment{}, fmt.Errorf(
-			"confirm reservation: %w",
+			"confirm order: %w",
 			err,
 		)
 	}
 
 	payload, err := json.Marshal(map[string]interface{}{
-		"payment_id":     payment.ID,
-		"reservation_id": payment.ReservationID,
-		"amount":         payment.Amount,
-		"currency":       payment.Currency,
+		"payment_id": payment.ID,
+		"order_id":   payment.OrderID,
+		"amount":     payment.Amount,
+		"currency":   payment.Currency,
 	})
 	if err != nil {
 		return db.Payment{}, fmt.Errorf(

@@ -80,6 +80,7 @@ type Payment struct {
 	Status            string
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
+	OrderID           pgtype.UUID
 }
 
 type PaymentEvent struct {

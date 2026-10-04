@@ -137,7 +137,7 @@ func main() {
 		fmt.Println("Processing payment succeeded event:")
 		fmt.Println("Event ID:", message.MessageId)
 		fmt.Println("Payment ID:", event.PaymentID)
-		fmt.Println("Reservation ID:", event.ReservationID)
+		fmt.Println("Order ID:", event.OrderID)
 		fmt.Println("Amount:", event.Amount)
 		fmt.Println("Currency:", event.Currency)
 

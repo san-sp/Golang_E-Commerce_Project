@@ -11,6 +11,7 @@ import (
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
@@ -51,6 +52,8 @@ func TestCreatePayment(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -70,9 +73,36 @@ func TestCreatePayment(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	payment, err := service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -98,6 +128,15 @@ func TestCreatePayment(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM orders WHERE id = $1",
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 
@@ -179,6 +218,8 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -198,9 +239,36 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	_, err = service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -219,8 +287,8 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		ctx,
 		`SELECT status, provider_payment_id
 	 FROM payments
-	 WHERE reservation_id = $1`,
-		createdReservation.ID,
+	 WHERE order_id = $1`,
+		createdOrder.ID,
 	).Scan(&status, &providerPaymentID)
 
 	if err != nil {
@@ -303,6 +371,8 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -322,9 +392,36 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	_, err = service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -341,8 +438,8 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		ctx,
 		`SELECT status, provider_payment_id
 	 FROM payments
-	 WHERE reservation_id = $1`,
-		createdReservation.ID,
+	 WHERE order_id = $1`,
+		createdOrder.ID,
 	).Scan(&status, &providerPaymentID)
 
 	if err != nil {
@@ -424,6 +521,8 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -443,9 +542,36 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	payment, err := service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -512,6 +638,15 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM orders WHERE id = $1",
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 

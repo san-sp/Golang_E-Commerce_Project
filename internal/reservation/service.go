@@ -165,3 +165,21 @@ func (s *Service) ConfirmReservation(
 
 	return reservation, nil
 }
+
+func (s *Service) CancelReservation(
+	ctx context.Context,
+	reservationID pgtype.UUID,
+) (db.Reservation, error) {
+	reservation, err := s.queries.CancelReservation(
+		ctx,
+		reservationID,
+	)
+	if err != nil {
+		return db.Reservation{}, fmt.Errorf(
+			"cancel reservation: %w",
+			err,
+		)
+	}
+
+	return reservation, nil
+}

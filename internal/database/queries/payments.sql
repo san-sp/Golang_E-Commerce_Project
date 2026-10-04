@@ -1,6 +1,6 @@
 -- name: CreatePayment :one
 INSERT INTO payments (
-    reservation_id,
+    order_id,
     provider,
     provider_payment_id,
     amount,

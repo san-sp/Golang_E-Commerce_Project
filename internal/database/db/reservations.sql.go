@@ -11,6 +11,40 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelReservation = `-- name: CancelReservation :one
+UPDATE reservations
+SET
+    status = 'CANCELLED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'ACTIVE'
+RETURNING
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) CancelReservation(ctx context.Context, id pgtype.UUID) (Reservation, error) {
+	row := q.db.QueryRow(ctx, cancelReservation, id)
+	var i Reservation
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.OrderID,
+		&i.Quantity,
+		&i.Status,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const confirmReservation = `-- name: ConfirmReservation :one
 UPDATE reservations
 SET
@@ -191,6 +225,51 @@ func (q *Queries) ExpireReservation(ctx context.Context, id pgtype.UUID) (Reserv
 	return i, err
 }
 
+const getActiveReservationsByOrderID = `-- name: GetActiveReservationsByOrderID :many
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE order_id = $1
+  AND status = 'ACTIVE'
+ORDER BY created_at
+`
+
+func (q *Queries) GetActiveReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]Reservation, error) {
+	rows, err := q.db.Query(ctx, getActiveReservationsByOrderID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Reservation
+	for rows.Next() {
+		var i Reservation
+		if err := rows.Scan(
+			&i.ID,
+			&i.VariantID,
+			&i.OrderID,
+			&i.Quantity,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getActiveReservedQuantity = `-- name: GetActiveReservedQuantity :one
 SELECT
     COALESCE(SUM(quantity), 0)::BIGINT AS reserved_quantity
@@ -260,4 +339,48 @@ func (q *Queries) GetReservation(ctx context.Context, id pgtype.UUID) (Reservati
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getReservationsByOrderID = `-- name: GetReservationsByOrderID :many
+SELECT
+    id,
+    variant_id,
+    order_id,
+    quantity,
+    status,
+    expires_at,
+    created_at,
+    updated_at
+FROM reservations
+WHERE order_id = $1
+ORDER BY created_at
+`
+
+func (q *Queries) GetReservationsByOrderID(ctx context.Context, orderID pgtype.UUID) ([]Reservation, error) {
+	rows, err := q.db.Query(ctx, getReservationsByOrderID, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Reservation
+	for rows.Next() {
+		var i Reservation
+		if err := rows.Scan(
+			&i.ID,
+			&i.VariantID,
+			&i.OrderID,
+			&i.Quantity,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

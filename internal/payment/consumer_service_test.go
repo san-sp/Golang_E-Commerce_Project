@@ -13,6 +13,7 @@ import (
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
@@ -58,6 +59,8 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -77,9 +80,36 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	payment, err := service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -139,6 +169,15 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM orders WHERE id = $1",
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 
@@ -239,6 +278,8 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 		15*time.Minute,
 	)
 
+	orderService := order.NewService(pool, queries)
+
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
 			0xc5, 0x17, 0x4f, 0x98,
@@ -258,9 +299,36 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 		t.Fatalf("create test reservation: %v", err)
 	}
 
+	createdOrder, _, err := orderService.CreateOrder(
+		ctx,
+		[]order.ItemInput{
+			{
+				VariantID: variantID,
+				Quantity:  1,
+				UnitPrice: 899900,
+			},
+		},
+		"INR",
+	)
+	if err != nil {
+		t.Fatalf("create test order: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET order_id = $1
+	 WHERE id = $2`,
+		createdOrder.ID,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("link reservation to order: %v", err)
+	}
+
 	payment, err := service.CreatePayment(
 		ctx,
-		createdReservation.ID,
+		createdOrder.ID,
 		"mock",
 		899900,
 		"INR",
@@ -320,6 +388,15 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			"DELETE FROM orders WHERE id = $1",
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 

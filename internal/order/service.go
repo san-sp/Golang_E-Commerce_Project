@@ -3,6 +3,7 @@ package order
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -163,4 +164,22 @@ func (s *Service) GetOrder(
 	}
 
 	return order, items, nil
+}
+
+func (s *Service) CancelOrder(
+	ctx context.Context,
+	orderID pgtype.UUID,
+) (db.Order, error) {
+	order, err := s.queries.CancelOrder(
+		ctx,
+		orderID,
+	)
+	if err != nil {
+		return db.Order{}, fmt.Errorf(
+			"cancel order: %w",
+			err,
+		)
+	}
+
+	return order, nil
 }

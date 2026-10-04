@@ -30,6 +30,38 @@ FROM orders
 WHERE id = $1;
 
 
+-- name: ConfirmOrder :one
+UPDATE orders
+SET
+    status = 'CONFIRMED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'PENDING'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at;
+
+
+-- name: CancelOrder :one
+UPDATE orders
+SET
+    status = 'CANCELLED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'PENDING'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at;
+
+
 -- name: GetOrderItems :many
 SELECT
     id,
