@@ -2,7 +2,9 @@ package reservation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -10,18 +12,23 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 )
 
+var ErrInsufficientStock = errors.New("insufficient stock")
+
 type Service struct {
-	pool    *pgxpool.Pool
-	queries *db.Queries
+	pool           *pgxpool.Pool
+	queries        *db.Queries
+	reservationTTL time.Duration
 }
 
 func NewService(
 	pool *pgxpool.Pool,
 	queries *db.Queries,
+	reservationTTL time.Duration,
 ) *Service {
 	return &Service{
-		pool:    pool,
-		queries: queries,
+		pool:           pool,
+		queries:        queries,
+		reservationTTL: reservationTTL,
 	}
 }
 
@@ -29,10 +36,14 @@ func (s *Service) CreateReservation(
 	ctx context.Context,
 	variantID pgtype.UUID,
 	quantity int64,
-	expiresAt pgtype.Timestamptz,
 ) (db.Reservation, error) {
 	if quantity <= 0 {
 		return db.Reservation{}, fmt.Errorf("quantity must be greater than zero")
+	}
+
+	expiresAt := pgtype.Timestamptz{
+		Time:  time.Now().Add(s.reservationTTL),
+		Valid: true,
 	}
 
 	tx, err := s.pool.Begin(ctx)
@@ -57,7 +68,8 @@ func (s *Service) CreateReservation(
 
 	if quantity > availableQuantity {
 		return db.Reservation{}, fmt.Errorf(
-			"insufficient stock: requested=%d available=%d",
+			"%w: requested=%d available=%d",
+			ErrInsufficientStock,
 			quantity,
 			availableQuantity,
 		)

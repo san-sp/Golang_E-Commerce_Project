@@ -55,6 +55,7 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 	reservationService := reservation.NewService(
 		pool,
 		queries,
+		15*time.Minute,
 	)
 
 	variantID := pgtype.UUID{
@@ -67,16 +68,10 @@ func TestProcessPaymentSucceeded(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -241,6 +236,7 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 	reservationService := reservation.NewService(
 		pool,
 		queries,
+		15*time.Minute,
 	)
 
 	variantID := pgtype.UUID{
@@ -253,16 +249,10 @@ func TestProcessPaymentSucceededDuplicate(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)

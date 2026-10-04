@@ -42,7 +42,11 @@ func TestConcurrentReservations(t *testing.T) {
 	})
 
 	queries := db.New(pool)
-	service := NewService(pool, queries)
+	service := NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	// Create isolated test data.
 	var productID pgtype.UUID
@@ -134,11 +138,6 @@ func TestConcurrentReservations(t *testing.T) {
 		}
 	})
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	// Create two concurrent requests.
 	start := make(chan struct{})
 	results := make(chan reservationResult, 2)
@@ -156,7 +155,6 @@ func TestConcurrentReservations(t *testing.T) {
 				ctx,
 				variantID,
 				1,
-				expiresAt,
 			)
 
 			results <- reservationResult{

@@ -2,6 +2,7 @@ package reservation
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -36,7 +37,11 @@ func TestCreateReservation(t *testing.T) {
 
 	queries := db.New(pool)
 
-	service := NewService(pool, queries)
+	service := NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -48,16 +53,10 @@ func TestCreateReservation(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	reservation, err := service.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create reservation: %v", err)
@@ -67,6 +66,16 @@ func TestCreateReservation(t *testing.T) {
 		t.Fatalf(
 			"expected reservation status ACTIVE, got %s",
 			reservation.Status,
+		)
+	}
+
+	expectedExpiration := time.Now().Add(15 * time.Minute)
+
+	if reservation.ExpiresAt.Time.Before(expectedExpiration.Add(-5*time.Second)) ||
+		reservation.ExpiresAt.Time.After(expectedExpiration.Add(5*time.Second)) {
+		t.Fatalf(
+			"expected expiration to be approximately 15 minutes from now, got %s",
+			reservation.ExpiresAt.Time,
 		)
 	}
 
@@ -83,11 +92,17 @@ func TestCreateReservation(t *testing.T) {
 		ctx,
 		variantID,
 		999999,
-		expiresAt,
 	)
 
 	if err == nil {
 		t.Fatal("expected insufficient stock error, got nil")
+	}
+
+	if !errors.Is(err, ErrInsufficientStock) {
+		t.Fatalf(
+			"expected ErrInsufficientStock, got %v",
+			err,
+		)
 	}
 
 	t.Logf("expected reservation failure: %v", err)

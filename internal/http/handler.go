@@ -9,17 +9,21 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
 type Handler struct {
-	paymentService *payment.Service
+	paymentService     *payment.Service
+	reservationService *reservation.Service
 }
 
 func NewHandler(
 	paymentService *payment.Service,
+	reservationService *reservation.Service,
 ) *Handler {
 	return &Handler{
-		paymentService: paymentService,
+		paymentService:     paymentService,
+		reservationService: reservationService,
 	}
 }
 
@@ -152,6 +156,71 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 			"provider_payment_id": payment.ProviderPaymentID,
 			"amount":              payment.Amount,
 			"currency":            payment.Currency,
+		},
+	)
+}
+
+func (h *Handler) CreateReservation(c *gin.Context) {
+	var request CreateReservationRequest
+
+	err := c.ShouldBindJSON(&request)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_REQUEST",
+			"invalid request",
+		)
+		return
+	}
+
+	variantID, err := uuid.Parse(request.VariantID)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_VARIANT_ID",
+			"invalid variant_id",
+		)
+		return
+	}
+
+	createdReservation, err := h.reservationService.CreateReservation(
+		c.Request.Context(),
+		pgtype.UUID{
+			Bytes: variantID,
+			Valid: true,
+		},
+		request.Quantity,
+	)
+	if err != nil {
+		if errors.Is(err, reservation.ErrInsufficientStock) {
+			writeError(
+				c,
+				http.StatusConflict,
+				"INSUFFICIENT_STOCK",
+				"insufficient stock",
+			)
+			return
+		}
+
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"INTERNAL_ERROR",
+			"internal server error",
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusCreated,
+		gin.H{
+			"id":         createdReservation.ID,
+			"variant_id": createdReservation.VariantID,
+			"quantity":   createdReservation.Quantity,
+			"status":     createdReservation.Status,
+			"expires_at": createdReservation.ExpiresAt,
 		},
 	)
 }

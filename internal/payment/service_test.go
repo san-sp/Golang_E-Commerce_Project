@@ -45,7 +45,11 @@ func TestCreatePayment(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -57,16 +61,10 @@ func TestCreatePayment(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -175,7 +173,11 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -187,16 +189,10 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -301,7 +297,11 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -313,16 +313,10 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -424,7 +418,11 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -436,16 +434,10 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)

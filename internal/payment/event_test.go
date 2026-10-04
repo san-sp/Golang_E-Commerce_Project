@@ -47,7 +47,11 @@ func TestRecordPaymentEventDuplicate(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	variantID := pgtype.UUID{
 		Bytes: [16]byte{
@@ -59,16 +63,10 @@ func TestRecordPaymentEventDuplicate(t *testing.T) {
 		Valid: true,
 	}
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -196,7 +194,11 @@ func TestProcessPaymentWebhook(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	// Create isolated test product.
 	var productID pgtype.UUID
@@ -324,17 +326,11 @@ func TestProcessPaymentWebhook(t *testing.T) {
 		}
 	})
 
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(10 * time.Minute),
-		Valid: true,
-	}
-
 	// Create an ACTIVE reservation.
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
@@ -519,7 +515,11 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 		provider,
 	)
 
-	reservationService := reservation.NewService(pool, queries)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
 
 	// Create isolated test product.
 	var productID pgtype.UUID
@@ -647,19 +647,24 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 	})
 
 	// Create a reservation that will be expired.
-	expiresAt := pgtype.Timestamptz{
-		Time:  time.Now().Add(-10 * time.Minute),
-		Valid: true,
-	}
-
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
 		1,
-		expiresAt,
 	)
 	if err != nil {
 		t.Fatalf("create test reservation: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`UPDATE reservations
+	 SET expires_at = NOW() - INTERVAL '10 minutes'
+	 WHERE id = $1`,
+		createdReservation.ID,
+	)
+	if err != nil {
+		t.Fatalf("expire test reservation: %v", err)
 	}
 
 	// Create a PENDING payment.

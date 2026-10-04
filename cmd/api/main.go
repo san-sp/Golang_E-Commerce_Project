@@ -16,6 +16,7 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	apphttp "github.com/san-sp/Golang_E-Commerce_Project/internal/http"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
 func main() {
@@ -50,7 +51,16 @@ func main() {
 		paymentProvider,
 	)
 
-	handler := apphttp.NewHandler(paymentService)
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
+
+	handler := apphttp.NewHandler(
+		paymentService,
+		reservationService,
+	)
 
 	router := gin.New()
 
@@ -65,6 +75,11 @@ func main() {
 	api.POST(
 		"/payments",
 		handler.CreatePayment,
+	)
+
+	api.POST(
+		"/reservations",
+		handler.CreateReservation,
 	)
 
 	api.POST(
