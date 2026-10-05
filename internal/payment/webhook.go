@@ -9,6 +9,7 @@ import (
 var (
 	ErrDuplicateWebhook   = errors.New("payment webhook already processed")
 	ErrReservationExpired = errors.New("reservation expired")
+	ErrInvalidOrderState  = errors.New("invalid order state")
 )
 
 type PaymentWebhook struct {

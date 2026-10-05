@@ -220,10 +220,7 @@ func (s *Service) ProcessPaymentWebhook(
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.Payment{}, fmt.Errorf(
-				"confirm order: %w",
-				err,
-			)
+			return db.Payment{}, ErrInvalidOrderState
 		}
 
 		return db.Payment{}, fmt.Errorf(

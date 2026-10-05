@@ -385,6 +385,7 @@ func TestProcessPaymentWebhook(t *testing.T) {
 		EventType: "payment.succeeded",
 		PaymentID: payment.ID,
 	}
+
 	// Process the webhook.
 	updatedPayment, err := service.ProcessPaymentWebhook(
 		ctx,
@@ -400,6 +401,7 @@ func TestProcessPaymentWebhook(t *testing.T) {
 			updatedPayment.Status,
 		)
 	}
+
 	// Reservation should now be CONFIRMED.
 	var reservationStatus string
 	err = pool.QueryRow(
@@ -418,6 +420,28 @@ func TestProcessPaymentWebhook(t *testing.T) {
 			reservationStatus,
 		)
 	}
+
+	// Order should now be CONFIRMED.
+	var orderStatus string
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT status
+     FROM orders
+     WHERE id = $1`,
+		createdOrder.ID,
+	).Scan(&orderStatus)
+	if err != nil {
+		t.Fatalf("query order status: %v", err)
+	}
+
+	if orderStatus != "CONFIRMED" {
+		t.Fatalf(
+			"expected order status CONFIRMED, got %s",
+			orderStatus,
+		)
+	}
+
 	// Payment event should have been recorded.
 	var paymentEventCount int
 	err = pool.QueryRow(
