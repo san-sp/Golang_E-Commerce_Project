@@ -509,6 +509,63 @@ func (h *Handler) GetOrder(c *gin.Context) {
 		},
 	)
 }
+func (h *Handler) CancelOrder(c *gin.Context) {
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_ORDER_ID",
+			"invalid order id",
+		)
+		return
+	}
+
+	cancelledOrder, reservations, err := h.checkoutService.CancelOrder(
+		c.Request.Context(),
+		pgtype.UUID{
+			Bytes: orderID,
+			Valid: true,
+		},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, order.ErrOrderNotFound):
+			writeError(
+				c,
+				http.StatusNotFound,
+				"ORDER_NOT_FOUND",
+				"order not found",
+			)
+
+		case errors.Is(err, order.ErrInvalidOrderState):
+			writeError(
+				c,
+				http.StatusConflict,
+				"ORDER_CANNOT_BE_CANCELLED",
+				"order cannot be cancelled",
+			)
+
+		default:
+			writeError(
+				c,
+				http.StatusInternalServerError,
+				"INTERNAL_ERROR",
+				"internal server error",
+			)
+		}
+
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"order":        cancelledOrder,
+			"reservations": reservations,
+		},
+	)
+}
 
 func (h *Handler) AddCartItem(c *gin.Context) {
 	cartID, err := uuid.Parse(c.Param("id"))

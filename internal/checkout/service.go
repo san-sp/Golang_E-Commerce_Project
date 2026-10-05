@@ -292,3 +292,94 @@ func (s *Service) cancelFailedPaymentCheckout(
 
 	return nil
 }
+
+func (s *Service) CancelOrder(
+	ctx context.Context,
+	orderID pgtype.UUID,
+) (db.Order, []db.Reservation, error) {
+	if !orderID.Valid {
+		return db.Order{}, nil, errors.New("order ID is required")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return db.Order{}, nil, fmt.Errorf(
+			"begin order cancellation transaction: %w",
+			err,
+		)
+	}
+	defer tx.Rollback(ctx)
+
+	txQueries := s.queries.WithTx(tx)
+
+	orderRecord, err := txQueries.GetOrder(ctx, orderID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Order{}, nil, order.ErrOrderNotFound
+		}
+
+		return db.Order{}, nil, fmt.Errorf(
+			"get order: %w",
+			err,
+		)
+	}
+
+	if orderRecord.Status != "PENDING" {
+		return db.Order{}, nil, order.ErrInvalidOrderState
+	}
+
+	reservations, err := txQueries.GetActiveReservationsByOrderID(
+		ctx,
+		orderID,
+	)
+	if err != nil {
+		return db.Order{}, nil, fmt.Errorf(
+			"get active reservations: %w",
+			err,
+		)
+	}
+
+	cancelledReservations := make(
+		[]db.Reservation,
+		0,
+		len(reservations),
+	)
+
+	for _, reservation := range reservations {
+		cancelledReservation, err :=
+			s.reservationService.CancelReservationTx(
+				ctx,
+				tx,
+				reservation.ID,
+			)
+		if err != nil {
+			return db.Order{}, nil, fmt.Errorf(
+				"cancel reservation: %w",
+				err,
+			)
+		}
+
+		cancelledReservations = append(
+			cancelledReservations,
+			cancelledReservation,
+		)
+	}
+
+	cancelledOrder, err := s.orderService.CancelOrderTx(
+		ctx,
+		tx,
+		orderID,
+	)
+	if err != nil {
+		return db.Order{}, nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.Order{}, nil, fmt.Errorf(
+			"commit order cancellation transaction: %w",
+			err,
+		)
+	}
+
+	return cancelledOrder, cancelledReservations, nil
+}

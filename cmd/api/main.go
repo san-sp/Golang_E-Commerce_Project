@@ -114,6 +114,7 @@ func main() {
 
 	// Order
 	api.GET("/orders/:id", handler.GetOrder)
+	api.POST("/orders/:id/cancel", handler.CancelOrder)
 
 	server := &http.Server{
 		Addr:              ":8080",

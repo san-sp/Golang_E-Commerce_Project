@@ -498,6 +498,386 @@ func TestCheckoutHandlerSuccess(t *testing.T) {
 	})
 }
 
+func TestCancelOrderHandler(t *testing.T) {
+	handler, queries, _, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	// Create cart.
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	// Add item to cart.
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: checkoutTestVariantID(),
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	// Checkout.
+	gin.SetMode(gin.TestMode)
+
+	checkoutRouter := gin.New()
+
+	checkoutRouter.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  cart.ID,
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	checkoutRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	checkoutRequest.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	checkoutRecorder := httptest.NewRecorder()
+
+	checkoutRouter.ServeHTTP(
+		checkoutRecorder,
+		checkoutRequest,
+	)
+
+	if checkoutRecorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected checkout status 201, got %d: %s",
+			checkoutRecorder.Code,
+			checkoutRecorder.Body.String(),
+		)
+	}
+
+	var checkoutResponse struct {
+		Order struct {
+			ID string `json:"id"`
+		} `json:"order"`
+	}
+
+	err = json.Unmarshal(
+		checkoutRecorder.Body.Bytes(),
+		&checkoutResponse,
+	)
+	if err != nil {
+		t.Fatalf("decode checkout response: %v", err)
+	}
+
+	if checkoutResponse.Order.ID == "" {
+		t.Fatal("expected order ID")
+	}
+
+	orderID := checkoutResponse.Order.ID
+
+	// Cancel order.
+	cancelRouter := gin.New()
+
+	cancelRouter.POST(
+		"/api/v1/orders/:id/cancel",
+		handler.CancelOrder,
+	)
+
+	cancelRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/orders/"+orderID+"/cancel",
+		nil,
+	)
+
+	cancelRecorder := httptest.NewRecorder()
+
+	cancelRouter.ServeHTTP(
+		cancelRecorder,
+		cancelRequest,
+	)
+
+	if cancelRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected cancellation status 200, got %d: %s",
+			cancelRecorder.Code,
+			cancelRecorder.Body.String(),
+		)
+	}
+
+	var cancelResponse struct {
+		Order struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"order"`
+
+		Reservations []struct {
+			Status string `json:"status"`
+		} `json:"reservations"`
+	}
+
+	err = json.Unmarshal(
+		cancelRecorder.Body.Bytes(),
+		&cancelResponse,
+	)
+	if err != nil {
+		t.Fatalf("decode cancellation response: %v", err)
+	}
+
+	if cancelResponse.Order.ID != orderID {
+		t.Fatalf(
+			"expected order ID %s, got %s",
+			orderID,
+			cancelResponse.Order.ID,
+		)
+	}
+
+	if cancelResponse.Order.Status != "CANCELLED" {
+		t.Fatalf(
+			"expected order status CANCELLED, got %s",
+			cancelResponse.Order.Status,
+		)
+	}
+
+	if len(cancelResponse.Reservations) != 1 {
+		t.Fatalf(
+			"expected 1 reservation, got %d",
+			len(cancelResponse.Reservations),
+		)
+	}
+
+	if cancelResponse.Reservations[0].Status != "CANCELLED" {
+		t.Fatalf(
+			"expected reservation status CANCELLED, got %s",
+			cancelResponse.Reservations[0].Status,
+		)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM payments WHERE order_id = $1`,
+			orderID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE order_id = $1`,
+			orderID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			orderID,
+		)
+	})
+}
+
+func TestCancelOrderHandlerInvalidOrderID(t *testing.T) {
+	handler, _, _, _ := setupCheckoutHandler(t)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/orders/:id/cancel",
+		handler.CancelOrder,
+	)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/orders/not-a-uuid/cancel",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "INVALID_ORDER_ID" {
+		t.Fatalf(
+			"expected error code INVALID_ORDER_ID, got %s",
+			response.Error.Code,
+		)
+	}
+}
+
+func TestCancelOrderHandlerNotFound(t *testing.T) {
+	handler, _, _, _ := setupCheckoutHandler(t)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/orders/:id/cancel",
+		handler.CancelOrder,
+	)
+
+	orderID := uuid.New()
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/orders/"+orderID.String()+"/cancel",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected status 404, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "ORDER_NOT_FOUND" {
+		t.Fatalf(
+			"expected error code ORDER_NOT_FOUND, got %s",
+			response.Error.Code,
+		)
+	}
+}
+
+func TestCancelOrderHandlerConfirmedOrder(t *testing.T) {
+	handler, queries, _, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	orderRecord, err := queries.CreateOrder(
+		ctx,
+		db.CreateOrderParams{
+			TotalAmount: 899900,
+			Currency:    "INR",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			orderRecord.ID,
+		)
+	})
+
+	_, err = queries.ConfirmOrder(
+		ctx,
+		orderRecord.ID,
+	)
+	if err != nil {
+		t.Fatalf("confirm order: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/orders/:id/cancel",
+		handler.CancelOrder,
+	)
+
+	orderID := uuid.UUID(orderRecord.ID.Bytes)
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/orders/"+orderID.String()+"/cancel",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected status 409, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	err = json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "ORDER_CANNOT_BE_CANCELLED" {
+		t.Fatalf(
+			"expected error code ORDER_CANNOT_BE_CANCELLED, got %s",
+			response.Error.Code,
+		)
+	}
+}
+
 func TestCheckoutHandlerInvalidCartID(t *testing.T) {
 	handler, _, _, _ := setupCheckoutHandler(t)
 

@@ -183,3 +183,22 @@ func (s *Service) CancelReservation(
 
 	return reservation, nil
 }
+
+func (s *Service) CancelReservationTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	reservationID pgtype.UUID,
+) (db.Reservation, error) {
+	reservation, err := s.queries.WithTx(tx).CancelReservation(
+		ctx,
+		reservationID,
+	)
+	if err != nil {
+		return db.Reservation{}, fmt.Errorf(
+			"cancel reservation: %w",
+			err,
+		)
+	}
+
+	return reservation, nil
+}

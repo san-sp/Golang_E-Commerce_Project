@@ -207,6 +207,48 @@ func (s *Service) CancelOrder(
 	return db.Order{}, ErrInvalidOrderState
 }
 
+func (s *Service) CancelOrderTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	orderID pgtype.UUID,
+) (db.Order, error) {
+	txQueries := s.queries.WithTx(tx)
+
+	order, err := txQueries.CancelOrder(
+		ctx,
+		orderID,
+	)
+	if err == nil {
+		return order, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, fmt.Errorf(
+			"cancel order: %w",
+			err,
+		)
+	}
+
+	// The conditional UPDATE matched no row.
+	// Check whether the order exists inside the same transaction.
+	_, err = txQueries.GetOrder(
+		ctx,
+		orderID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, ErrOrderNotFound
+	}
+
+	if err != nil {
+		return db.Order{}, fmt.Errorf(
+			"get order after cancel failure: %w",
+			err,
+		)
+	}
+
+	return db.Order{}, ErrInvalidOrderState
+}
+
 func (s *Service) ConfirmOrder(
 	ctx context.Context,
 	orderID pgtype.UUID,

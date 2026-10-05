@@ -2,9 +2,12 @@ package checkout
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/joho/godotenv"
@@ -595,4 +598,151 @@ func TestCheckoutPaymentProviderUnknown(t *testing.T) {
 			result.Order.ID,
 		)
 	})
+}
+
+func TestCancelOrder(t *testing.T) {
+	service, queries := setupTestService(t)
+
+	ctx := context.Background()
+	variantID := testVariantID()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: variantID,
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	result, err := service.Checkout(
+		ctx,
+		cart.ID,
+		"INR",
+		"mock",
+	)
+	if err != nil {
+		t.Fatalf("checkout: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			result.Order.ID,
+		)
+	})
+
+	cancelledOrder, reservations, err := service.CancelOrder(
+		ctx,
+		result.Order.ID,
+	)
+	if err != nil {
+		t.Fatalf("cancel order: %v", err)
+	}
+
+	if cancelledOrder.Status != "CANCELLED" {
+		t.Fatalf(
+			"expected order status CANCELLED, got %s",
+			cancelledOrder.Status,
+		)
+	}
+
+	if len(reservations) != 1 {
+		t.Fatalf(
+			"expected 1 cancelled reservation, got %d",
+			len(reservations),
+		)
+	}
+
+	if reservations[0].Status != "CANCELLED" {
+		t.Fatalf(
+			"expected reservation status CANCELLED, got %s",
+			reservations[0].Status,
+		)
+	}
+}
+
+func TestCancelConfirmedOrder(t *testing.T) {
+	service, queries := setupTestService(t)
+
+	ctx := context.Background()
+
+	orderRecord, err := queries.CreateOrder(
+		ctx,
+		db.CreateOrderParams{
+			TotalAmount: 10000,
+			Currency:    "INR",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			orderRecord.ID,
+		)
+	})
+
+	_, err = queries.ConfirmOrder(
+		ctx,
+		orderRecord.ID,
+	)
+	if err != nil {
+		t.Fatalf("confirm order: %v", err)
+	}
+
+	_, _, err = service.CancelOrder(
+		ctx,
+		orderRecord.ID,
+	)
+
+	if !errors.Is(err, order.ErrInvalidOrderState) {
+		t.Fatalf(
+			"expected ErrInvalidOrderState, got %v",
+			err,
+		)
+	}
+}
+
+func TestCancelOrderNotFound(t *testing.T) {
+	service, _ := setupTestService(t)
+
+	ctx := context.Background()
+
+	orderID := pgtype.UUID{
+		Bytes: uuid.New(),
+		Valid: true,
+	}
+
+	_, _, err := service.CancelOrder(
+		ctx,
+		orderID,
+	)
+
+	if !errors.Is(err, order.ErrOrderNotFound) {
+		t.Fatalf(
+			"expected ErrOrderNotFound, got %v",
+			err,
+		)
+	}
 }
