@@ -95,50 +95,25 @@ func main() {
 
 	api := router.Group("/api/v1")
 
-	api.POST(
-		"/payments",
-		handler.CreatePayment,
-	)
+	// Cart
+	api.POST("/carts", handler.CreateCart)
+	api.GET("/carts/:id", handler.GetCart)
+	api.POST("/carts/:id/items", handler.AddCartItem)
+	api.PATCH("/carts/:id/items/:variant_id", handler.UpdateCartItem)
+	api.DELETE("/carts/:id/items/:variant_id", handler.RemoveCartItem)
 
-	api.POST(
-		"/reservations",
-		handler.CreateReservation,
-	)
+	// Checkout
+	api.POST("/checkout", handler.Checkout)
 
-	api.POST(
-		"/payments/webhook",
-		handler.PaymentWebhook,
-	)
+	// Reservation
+	api.POST("/reservations", handler.CreateReservation)
 
-	api.POST(
-		"/carts",
-		handler.CreateCart,
-	)
+	// Payment
+	api.POST("/payments", handler.CreatePayment)
+	api.POST("/payments/webhook", handler.PaymentWebhook)
 
-	api.GET(
-		"/carts/:id",
-		handler.GetCart,
-	)
-
-	api.POST(
-		"/carts/:id/items",
-		handler.AddCartItem,
-	)
-
-	api.PATCH(
-		"/carts/:id/items/:variant_id",
-		handler.UpdateCartItem,
-	)
-
-	api.DELETE(
-		"/carts/:id/items/:variant_id",
-		handler.RemoveCartItem,
-	)
-
-	api.POST(
-		"/checkout",
-		handler.Checkout,
-	)
+	// Order
+	api.GET("/orders/:id", handler.GetOrder)
 
 	server := &http.Server{
 		Addr:              ":8080",

@@ -444,6 +444,72 @@ func (h *Handler) Checkout(c *gin.Context) {
 	)
 }
 
+func (h *Handler) GetOrder(c *gin.Context) {
+	orderID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_ORDER_ID",
+			"invalid order_id",
+		)
+		return
+	}
+
+	foundOrder, items, err := h.orderService.GetOrder(
+		c.Request.Context(),
+		orderID,
+	)
+	if err != nil {
+		if errors.Is(err, order.ErrOrderNotFound) {
+			writeError(
+				c,
+				http.StatusNotFound,
+				"ORDER_NOT_FOUND",
+				"order not found",
+			)
+			return
+		}
+
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"INTERNAL_ERROR",
+			"internal server error",
+		)
+		return
+	}
+
+	responseItems := make([]gin.H, 0, len(items))
+
+	for _, item := range items {
+		responseItems = append(
+			responseItems,
+			gin.H{
+				"id":         item.ID,
+				"variant_id": item.VariantID,
+				"quantity":   item.Quantity,
+				"unit_price": item.UnitPrice,
+				"created_at": item.CreatedAt,
+				"updated_at": item.UpdatedAt,
+			},
+		)
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"id":           foundOrder.ID,
+			"status":       foundOrder.Status,
+			"total_amount": foundOrder.TotalAmount,
+			"currency":     foundOrder.Currency,
+			"items":        responseItems,
+			"created_at":   foundOrder.CreatedAt,
+			"updated_at":   foundOrder.UpdatedAt,
+		},
+	)
+}
+
 func (h *Handler) AddCartItem(c *gin.Context) {
 	cartID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

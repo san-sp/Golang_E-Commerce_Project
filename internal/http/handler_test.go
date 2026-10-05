@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -850,6 +852,191 @@ func TestCheckoutHandlerProviderUnknown(t *testing.T) {
 		t.Fatalf(
 			"expected error message %q, got %q",
 			"payment outcome is unknown; await payment confirmation",
+			response.Error.Message,
+		)
+	}
+}
+
+func TestGetOrderHandler(t *testing.T) {
+	handler, queries, _, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	orderRecord, err := queries.CreateOrder(
+		ctx,
+		db.CreateOrderParams{
+			TotalAmount: 1799800,
+			Currency:    "INR",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create order: %v", err)
+	}
+
+	_, err = queries.CreateOrderItem(
+		ctx,
+		db.CreateOrderItemParams{
+			OrderID:   orderRecord.ID,
+			VariantID: checkoutTestVariantID(),
+			Quantity:  2,
+			UnitPrice: 899900,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create order item: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			orderRecord.ID,
+		)
+	})
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/api/v1/orders/:id", handler.GetOrder)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/orders/"+orderRecord.ID.String(),
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		ID          string `json:"id"`
+		Status      string `json:"status"`
+		TotalAmount int64  `json:"total_amount"`
+		Currency    string `json:"currency"`
+		Items       []struct {
+			VariantID string `json:"variant_id"`
+			Quantity  int64  `json:"quantity"`
+			UnitPrice int64  `json:"unit_price"`
+		} `json:"items"`
+	}
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.ID != orderRecord.ID.String() {
+		t.Fatalf(
+			"expected order ID %s, got %s",
+			orderRecord.ID,
+			response.ID,
+		)
+	}
+
+	if response.Status != "PENDING" {
+		t.Fatalf(
+			"expected status PENDING, got %s",
+			response.Status,
+		)
+	}
+
+	if response.TotalAmount != 1799800 {
+		t.Fatalf(
+			"expected total amount 1799800, got %d",
+			response.TotalAmount,
+		)
+	}
+
+	if response.Currency != "INR" {
+		t.Fatalf(
+			"expected currency INR, got %s",
+			response.Currency,
+		)
+	}
+
+	if len(response.Items) != 1 {
+		t.Fatalf(
+			"expected 1 order item, got %d",
+			len(response.Items),
+		)
+	}
+
+	if response.Items[0].Quantity != 2 {
+		t.Fatalf(
+			"expected quantity 2, got %d",
+			response.Items[0].Quantity,
+		)
+	}
+
+	if response.Items[0].UnitPrice != 899900 {
+		t.Fatalf(
+			"expected unit price 899900, got %d",
+			response.Items[0].UnitPrice,
+		)
+	}
+}
+
+func TestGetOrderHandlerNotFound(t *testing.T) {
+	handler, _, _, _ := setupCheckoutHandler(t)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET("/api/v1/orders/:id", handler.GetOrder)
+
+	orderID := uuid.New()
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/orders/"+orderID.String(),
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected status 404, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "ORDER_NOT_FOUND" {
+		t.Fatalf(
+			"expected error code ORDER_NOT_FOUND, got %s",
+			response.Error.Code,
+		)
+	}
+
+	if response.Error.Message != "order not found" {
+		t.Fatalf(
+			"expected error message %q, got %q",
+			"order not found",
 			response.Error.Message,
 		)
 	}
