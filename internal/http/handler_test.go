@@ -11,12 +11,97 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
+
+func setupCheckoutHandler(t *testing.T) (
+	*Handler,
+	*db.Queries,
+	*payment.MockProvider,
+	*pgxpool.Pool,
+) {
+	t.Helper()
+
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+
+	orderService := order.NewService(
+		pool,
+		queries,
+	)
+
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		15*time.Minute,
+	)
+
+	provider := payment.NewMockProvider()
+
+	paymentService := payment.NewService(
+		pool,
+		queries,
+		provider,
+	)
+
+	checkoutService := checkout.NewService(
+		pool,
+		queries,
+		orderService,
+		reservationService,
+		paymentService,
+	)
+
+	handler := NewHandler(
+		paymentService,
+		reservationService,
+		nil,
+		checkoutService,
+		orderService,
+	)
+
+	return handler, queries, provider, pool
+}
+
+func checkoutTestVariantID() pgtype.UUID {
+	return pgtype.UUID{
+		Bytes: [16]byte{
+			0xc5, 0x17, 0x4f, 0x98,
+			0x5b, 0xa2, 0x45, 0x3e,
+			0x92, 0xfb, 0x26, 0x6e,
+			0x81, 0x8f, 0xbd, 0x92,
+		},
+		Valid: true,
+	}
+}
 
 func TestCreateReservationHandler(t *testing.T) {
 	err := godotenv.Load("../../.env")
@@ -50,6 +135,8 @@ func TestCreateReservationHandler(t *testing.T) {
 	handler := NewHandler(
 		nil,
 		reservationService,
+		nil,
+		nil,
 		nil,
 	)
 
@@ -178,6 +265,8 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		nil,
 		reservationService,
 		nil,
+		nil,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -242,6 +331,525 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		t.Fatalf(
 			"expected error message %q, got %q",
 			"insufficient stock",
+			response.Error.Message,
+		)
+	}
+}
+
+func TestCheckoutHandlerSuccess(t *testing.T) {
+	handler, queries, _, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: checkoutTestVariantID(),
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  cart.ID,
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status 201, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Order struct {
+			ID          string `json:"id"`
+			Status      string `json:"status"`
+			TotalAmount int64  `json:"total_amount"`
+			Currency    string `json:"currency"`
+		} `json:"order"`
+
+		Payment struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+			Amount int64  `json:"amount"`
+		} `json:"payment"`
+	}
+
+	err = json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Order.ID == "" {
+		t.Fatal("expected order ID")
+	}
+
+	if response.Order.Status != "PENDING" {
+		t.Fatalf(
+			"expected order status PENDING, got %s",
+			response.Order.Status,
+		)
+	}
+
+	if response.Order.TotalAmount != 899900 {
+		t.Fatalf(
+			"expected total amount 899900, got %d",
+			response.Order.TotalAmount,
+		)
+	}
+
+	if response.Order.Currency != "INR" {
+		t.Fatalf(
+			"expected currency INR, got %s",
+			response.Order.Currency,
+		)
+	}
+
+	if response.Payment.ID == "" {
+		t.Fatal("expected payment ID")
+	}
+
+	if response.Payment.Status != "PENDING" {
+		t.Fatalf(
+			"expected payment status PENDING, got %s",
+			response.Payment.Status,
+		)
+	}
+
+	if response.Payment.Amount != 899900 {
+		t.Fatalf(
+			"expected payment amount 899900, got %d",
+			response.Payment.Amount,
+		)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM payments WHERE order_id = $1`,
+			response.Order.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE order_id = $1`,
+			response.Order.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			response.Order.ID,
+		)
+	})
+}
+
+func TestCheckoutHandlerInvalidCartID(t *testing.T) {
+	handler, _, _, _ := setupCheckoutHandler(t)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  "not-a-uuid",
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	err = json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "INVALID_REQUEST" {
+		t.Fatalf(
+			"expected error code INVALID_REQUEST, got %s",
+			response.Error.Code,
+		)
+	}
+}
+
+func TestCheckoutHandlerEmptyCart(t *testing.T) {
+	handler, queries, _, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  cart.ID,
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected status 409, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	err = json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	)
+	if err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "CART_EMPTY" {
+		t.Fatalf(
+			"expected error code CART_EMPTY, got %s",
+			response.Error.Code,
+		)
+	}
+
+	if response.Error.Message != "cart is empty" {
+		t.Fatalf(
+			"expected error message %q, got %q",
+			"cart is empty",
+			response.Error.Message,
+		)
+	}
+}
+
+func TestCheckoutHandlerProviderFailed(t *testing.T) {
+	handler, queries, provider, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	provider.SetFailure(true)
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: checkoutTestVariantID(),
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  cart.ID,
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadGateway {
+		t.Fatalf(
+			"expected status 502, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "PAYMENT_FAILED" {
+		t.Fatalf(
+			"expected error code PAYMENT_FAILED, got %s",
+			response.Error.Code,
+		)
+	}
+
+	if response.Error.Message != "payment provider failed" {
+		t.Fatalf(
+			"expected error message %q, got %q",
+			"payment provider failed",
+			response.Error.Message,
+		)
+	}
+}
+
+func TestCheckoutHandlerProviderUnknown(t *testing.T) {
+	handler, queries, provider, pool := setupCheckoutHandler(t)
+
+	ctx := context.Background()
+
+	provider.SetUnknown()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: checkoutTestVariantID(),
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.POST(
+		"/api/v1/checkout",
+		handler.Checkout,
+	)
+
+	requestBody := map[string]any{
+		"cart_id":  cart.ID,
+		"currency": "INR",
+		"provider": "mock",
+	}
+
+	body, err := json.Marshal(requestBody)
+	if err != nil {
+		t.Fatalf("marshal request body: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/checkout",
+		bytes.NewReader(body),
+	)
+
+	request.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusAccepted {
+		t.Fatalf(
+			"expected status 202, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Error ErrorResponse `json:"error"`
+	}
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&response,
+	); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+
+	if response.Error.Code != "PAYMENT_OUTCOME_UNKNOWN" {
+		t.Fatalf(
+			"expected error code PAYMENT_OUTCOME_UNKNOWN, got %s",
+			response.Error.Code,
+		)
+	}
+
+	if response.Error.Message != "payment outcome is unknown; await payment confirmation" {
+		t.Fatalf(
+			"expected error message %q, got %q",
+			"payment outcome is unknown; await payment confirmation",
 			response.Error.Message,
 		)
 	}

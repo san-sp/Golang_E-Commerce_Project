@@ -13,9 +13,11 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	apphttp "github.com/san-sp/Golang_E-Commerce_Project/internal/http"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
@@ -62,10 +64,25 @@ func main() {
 		queries,
 	)
 
+	orderService := order.NewService(
+		pool,
+		queries,
+	)
+
+	checkoutService := checkout.NewService(
+		pool,
+		queries,
+		orderService,
+		reservationService,
+		paymentService,
+	)
+
 	handler := apphttp.NewHandler(
 		paymentService,
 		reservationService,
 		cartService,
+		checkoutService,
+		orderService,
 	)
 
 	router := gin.New()
@@ -116,6 +133,11 @@ func main() {
 	api.DELETE(
 		"/carts/:id/items/:variant_id",
 		handler.RemoveCartItem,
+	)
+
+	api.POST(
+		"/checkout",
+		handler.Checkout,
 	)
 
 	server := &http.Server{

@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
@@ -17,17 +19,23 @@ type Handler struct {
 	paymentService     *payment.Service
 	reservationService *reservation.Service
 	cartService        *cart.Service
+	checkoutService    *checkout.Service
+	orderService       *order.Service
 }
 
 func NewHandler(
 	paymentService *payment.Service,
 	reservationService *reservation.Service,
 	cartService *cart.Service,
+	checkoutService *checkout.Service,
+	orderService *order.Service,
 ) *Handler {
 	return &Handler{
 		paymentService:     paymentService,
 		reservationService: reservationService,
 		cartService:        cartService,
+		checkoutService:    checkoutService,
+		orderService:       orderService,
 	}
 }
 
@@ -104,12 +112,10 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 		"payment webhook processed",
 	)
 }
-
 func (h *Handler) CreatePayment(c *gin.Context) {
 	var request CreatePaymentRequest
 
-	err := c.ShouldBindJSON(&request)
-	if err != nil {
+	if err := c.ShouldBindJSON(&request); err != nil {
 		writeError(
 			c,
 			http.StatusBadRequest,
@@ -119,28 +125,92 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 		return
 	}
 
-	reservationID, err := uuid.Parse(request.ReservationID)
+	orderID, err := uuid.Parse(request.OrderID)
 	if err != nil {
 		writeError(
 			c,
 			http.StatusBadRequest,
-			"INVALID_RESERVATION_ID",
-			"invalid reservation_id",
+			"INVALID_ORDER_ID",
+			"invalid order_id",
 		)
 		return
 	}
 
-	payment, err := h.paymentService.CreatePayment(
+	orderRecord, _, err := h.orderService.GetOrder(
+		c.Request.Context(),
+		orderID,
+	)
+	if err != nil {
+		if errors.Is(err, order.ErrOrderNotFound) {
+			writeError(
+				c,
+				http.StatusNotFound,
+				"ORDER_NOT_FOUND",
+				"order not found",
+			)
+			return
+		}
+
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"INTERNAL_ERROR",
+			"internal server error",
+		)
+		return
+	}
+
+	if orderRecord.Status != "PENDING" {
+		writeError(
+			c,
+			http.StatusConflict,
+			"ORDER_NOT_PENDING",
+			"order is not pending",
+		)
+		return
+	}
+
+	if request.Currency != orderRecord.Currency {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"CURRENCY_MISMATCH",
+			"currency does not match order currency",
+		)
+		return
+	}
+
+	paymentRecord, err := h.paymentService.CreatePayment(
 		c.Request.Context(),
 		pgtype.UUID{
-			Bytes: reservationID,
+			Bytes: orderID,
 			Valid: true,
 		},
 		request.Provider,
-		request.Amount,
-		request.Currency,
+		orderRecord.TotalAmount,
+		orderRecord.Currency,
 	)
 	if err != nil {
+		if errors.Is(err, payment.ErrProviderFailed) {
+			writeError(
+				c,
+				http.StatusBadGateway,
+				"PAYMENT_FAILED",
+				"payment provider failed",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrProviderUnknown) {
+			writeError(
+				c,
+				http.StatusAccepted,
+				"PAYMENT_OUTCOME_UNKNOWN",
+				"payment outcome is unknown; await payment confirmation",
+			)
+			return
+		}
+
 		writeError(
 			c,
 			http.StatusInternalServerError,
@@ -153,13 +223,13 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 	c.JSON(
 		http.StatusCreated,
 		gin.H{
-			"id":                  payment.ID,
-			"status":              payment.Status,
-			"reservation_id":      payment.ReservationID,
-			"provider":            payment.Provider,
-			"provider_payment_id": payment.ProviderPaymentID,
-			"amount":              payment.Amount,
-			"currency":            payment.Currency,
+			"id":                  paymentRecord.ID,
+			"status":              paymentRecord.Status,
+			"order_id":            paymentRecord.OrderID,
+			"provider":            paymentRecord.Provider,
+			"provider_payment_id": paymentRecord.ProviderPaymentID,
+			"amount":              paymentRecord.Amount,
+			"currency":            paymentRecord.Currency,
 		},
 	)
 }
@@ -250,6 +320,126 @@ func (h *Handler) CreateCart(c *gin.Context) {
 			"status":     cart.Status,
 			"created_at": cart.CreatedAt,
 			"updated_at": cart.UpdatedAt,
+		},
+	)
+}
+
+func (h *Handler) Checkout(c *gin.Context) {
+	var request CheckoutRequest
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_REQUEST",
+			"invalid request",
+		)
+		return
+	}
+
+	cartID, err := uuid.Parse(request.CartID)
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_CART_ID",
+			"invalid cart_id",
+		)
+		return
+	}
+
+	result, err := h.checkoutService.Checkout(
+		c.Request.Context(),
+		pgtype.UUID{
+			Bytes: cartID,
+			Valid: true,
+		},
+		request.Currency,
+		request.Provider,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, checkout.ErrCartNotFound):
+			writeError(
+				c,
+				http.StatusNotFound,
+				"CART_NOT_FOUND",
+				"cart not found",
+			)
+
+		case errors.Is(err, checkout.ErrCartNotActive):
+			writeError(
+				c,
+				http.StatusConflict,
+				"CART_NOT_ACTIVE",
+				"cart is not active",
+			)
+
+		case errors.Is(err, checkout.ErrCartEmpty):
+			writeError(
+				c,
+				http.StatusConflict,
+				"CART_EMPTY",
+				"cart is empty",
+			)
+
+		case errors.Is(err, payment.ErrProviderFailed):
+			writeError(
+				c,
+				http.StatusBadGateway,
+				"PAYMENT_FAILED",
+				"payment provider failed",
+			)
+
+		case errors.Is(err, payment.ErrProviderUnknown):
+			writeError(
+				c,
+				http.StatusAccepted,
+				"PAYMENT_OUTCOME_UNKNOWN",
+				"payment outcome is unknown; await payment confirmation",
+			)
+
+		case errors.Is(err, reservation.ErrInsufficientStock):
+			writeError(
+				c,
+				http.StatusConflict,
+				"INSUFFICIENT_STOCK",
+				"insufficient stock",
+			)
+
+		default:
+			writeError(
+				c,
+				http.StatusInternalServerError,
+				"CHECKOUT_FAILED",
+				"checkout failed",
+			)
+		}
+
+		return
+	}
+
+	c.JSON(
+		http.StatusCreated,
+		gin.H{
+			"order": gin.H{
+				"id":           result.Order.ID,
+				"status":       result.Order.Status,
+				"total_amount": result.Order.TotalAmount,
+				"currency":     result.Order.Currency,
+				"created_at":   result.Order.CreatedAt,
+				"updated_at":   result.Order.UpdatedAt,
+			},
+			"order_items":  result.OrderItems,
+			"reservations": result.Reservations,
+			"payment": gin.H{
+				"id":                  result.Payment.ID,
+				"status":              result.Payment.Status,
+				"provider":            result.Payment.Provider,
+				"provider_payment_id": result.Payment.ProviderPaymentID,
+				"amount":              result.Payment.Amount,
+				"currency":            result.Payment.Currency,
+			},
 		},
 	)
 }

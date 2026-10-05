@@ -7,10 +7,9 @@ type PaymentWebhookRequest struct {
 }
 
 type CreatePaymentRequest struct {
-	ReservationID string `json:"reservation_id" binding:"required"`
-	Provider      string `json:"provider" binding:"required"`
-	Amount        int64  `json:"amount" binding:"required,gt=0"`
-	Currency      string `json:"currency" binding:"required"`
+	OrderID  string `json:"order_id" binding:"required,uuid"`
+	Provider string `json:"provider" binding:"required"`
+	Currency string `json:"currency" binding:"required"`
 }
 
 type CreateReservationRequest struct {
@@ -25,4 +24,10 @@ type AddCartItemRequest struct {
 
 type UpdateCartItemRequest struct {
 	Quantity int64 `json:"quantity" binding:"required,gt=0"`
+}
+
+type CheckoutRequest struct {
+	CartID   string `json:"cart_id" binding:"required,uuid"`
+	Currency string `json:"currency" binding:"required"`
+	Provider string `json:"provider" binding:"required"`
 }
