@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/joho/godotenv"
@@ -11,6 +12,7 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
@@ -47,7 +49,15 @@ func setupTestService(t *testing.T) (
 	reservationService := reservation.NewService(
 		pool,
 		queries,
-		30*60*1000000000, // 30 minutes
+		30*time.Minute,
+	)
+
+	provider := payment.NewMockProvider()
+
+	paymentService := payment.NewService(
+		pool,
+		queries,
+		provider,
 	)
 
 	service := NewService(
@@ -55,9 +65,64 @@ func setupTestService(t *testing.T) (
 		queries,
 		orderService,
 		reservationService,
+		paymentService,
 	)
 
 	return service, queries
+}
+
+func setupTestServiceWithProvider(
+	t *testing.T,
+) (*Service, *db.Queries, *payment.MockProvider) {
+	t.Helper()
+
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+
+	orderService := order.NewService(pool, queries)
+
+	reservationService := reservation.NewService(
+		pool,
+		queries,
+		30*time.Minute,
+	)
+
+	provider := payment.NewMockProvider()
+
+	paymentService := payment.NewService(
+		pool,
+		queries,
+		provider,
+	)
+
+	service := NewService(
+		pool,
+		queries,
+		orderService,
+		reservationService,
+		paymentService,
+	)
+
+	return service, queries, provider
 }
 
 func testVariantID() pgtype.UUID {
@@ -94,6 +159,7 @@ func TestCheckoutEmptyCart(t *testing.T) {
 		ctx,
 		cart.ID,
 		"INR",
+		"mock",
 	)
 
 	if err != ErrCartEmpty {
@@ -139,12 +205,19 @@ func TestCheckoutSuccess(t *testing.T) {
 		ctx,
 		cart.ID,
 		"INR",
+		"mock",
 	)
 	if err != nil {
 		t.Fatalf("checkout: %v", err)
 	}
 
 	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM payments WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
 		_, _ = service.pool.Exec(
 			ctx,
 			`DELETE FROM reservations WHERE order_id = $1`,
@@ -273,6 +346,7 @@ func TestCheckoutRollsBackOrderWhenReservationFails(t *testing.T) {
 		ctx,
 		cart.ID,
 		currency,
+		"mock",
 	)
 	if err == nil {
 		t.Fatal("expected checkout to fail")
@@ -297,4 +371,228 @@ func TestCheckoutRollsBackOrderWhenReservationFails(t *testing.T) {
 			orderCount,
 		)
 	}
+}
+
+func TestCheckoutPaymentProviderFailure(t *testing.T) {
+	service, queries, provider := setupTestServiceWithProvider(t)
+
+	ctx := context.Background()
+	variantID := testVariantID()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: variantID,
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	provider.SetFailure(true)
+
+	result, err := service.Checkout(
+		ctx,
+		cart.ID,
+		"INR",
+		"mock",
+	)
+
+	if err == nil {
+		t.Fatal("expected checkout to fail")
+	}
+
+	if result.Payment.Status != "FAILED" {
+		t.Fatalf(
+			"expected payment status FAILED, got %s",
+			result.Payment.Status,
+		)
+	}
+
+	var orderStatus string
+
+	err = service.pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM orders
+		 WHERE id = $1`,
+		result.Order.ID,
+	).Scan(&orderStatus)
+	if err != nil {
+		t.Fatalf("get order status: %v", err)
+	}
+
+	if orderStatus != "CANCELLED" {
+		t.Fatalf(
+			"expected order status CANCELLED, got %s",
+			orderStatus,
+		)
+	}
+
+	var reservationStatus string
+
+	err = service.pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM reservations
+		 WHERE order_id = $1`,
+		result.Order.ID,
+	).Scan(&reservationStatus)
+	if err != nil {
+		t.Fatalf("get reservation status: %v", err)
+	}
+
+	if reservationStatus != "CANCELLED" {
+		t.Fatalf(
+			"expected reservation status CANCELLED, got %s",
+			reservationStatus,
+		)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM payments WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			result.Order.ID,
+		)
+	})
+}
+
+func TestCheckoutPaymentProviderUnknown(t *testing.T) {
+	service, queries, provider := setupTestServiceWithProvider(t)
+
+	ctx := context.Background()
+	variantID := testVariantID()
+
+	cart, err := queries.CreateCart(ctx)
+	if err != nil {
+		t.Fatalf("create cart: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM carts WHERE id = $1`,
+			cart.ID,
+		)
+	})
+
+	_, err = queries.AddCartItem(
+		ctx,
+		db.AddCartItemParams{
+			CartID:    cart.ID,
+			VariantID: variantID,
+			Quantity:  1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("add cart item: %v", err)
+	}
+
+	provider.SetUnknown()
+
+	result, err := service.Checkout(
+		ctx,
+		cart.ID,
+		"INR",
+		"mock",
+	)
+
+	if err == nil {
+		t.Fatal("expected checkout to return unknown payment outcome")
+	}
+
+	if result.Payment.Status != "PENDING" {
+		t.Fatalf(
+			"expected payment status PENDING, got %s",
+			result.Payment.Status,
+		)
+	}
+
+	var orderStatus string
+
+	err = service.pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM orders
+		 WHERE id = $1`,
+		result.Order.ID,
+	).Scan(&orderStatus)
+	if err != nil {
+		t.Fatalf("get order status: %v", err)
+	}
+
+	if orderStatus != "PENDING" {
+		t.Fatalf(
+			"expected order status PENDING, got %s",
+			orderStatus,
+		)
+	}
+
+	var reservationStatus string
+
+	err = service.pool.QueryRow(
+		ctx,
+		`SELECT status
+		 FROM reservations
+		 WHERE order_id = $1`,
+		result.Order.ID,
+	).Scan(&reservationStatus)
+	if err != nil {
+		t.Fatalf("get reservation status: %v", err)
+	}
+
+	if reservationStatus != "ACTIVE" {
+		t.Fatalf(
+			"expected reservation status ACTIVE, got %s",
+			reservationStatus,
+		)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM payments WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE order_id = $1`,
+			result.Order.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM orders WHERE id = $1`,
+			result.Order.ID,
+		)
+	})
 }
