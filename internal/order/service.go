@@ -14,7 +14,8 @@ import (
 )
 
 var (
-	ErrOrderNotFound = errors.New("order not found")
+	ErrOrderNotFound     = errors.New("order not found")
+	ErrInvalidOrderState = errors.New("invalid order state")
 )
 
 type Service struct {
@@ -174,12 +175,71 @@ func (s *Service) CancelOrder(
 		ctx,
 		orderID,
 	)
-	if err != nil {
+	if err == nil {
+		return order, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
 		return db.Order{}, fmt.Errorf(
 			"cancel order: %w",
 			err,
 		)
 	}
 
-	return order, nil
+	// The conditional UPDATE matched no row.
+	// Check whether the order exists so we can distinguish
+	// "not found" from "invalid state".
+	_, err = s.queries.GetOrder(
+		ctx,
+		orderID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, ErrOrderNotFound
+	}
+
+	if err != nil {
+		return db.Order{}, fmt.Errorf(
+			"get order after cancel failure: %w",
+			err,
+		)
+	}
+
+	return db.Order{}, ErrInvalidOrderState
+}
+
+func (s *Service) ConfirmOrder(
+	ctx context.Context,
+	orderID pgtype.UUID,
+) (db.Order, error) {
+	order, err := s.queries.ConfirmOrder(
+		ctx,
+		orderID,
+	)
+	if err == nil {
+		return order, nil
+	}
+
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, fmt.Errorf(
+			"confirm order: %w",
+			err,
+		)
+	}
+
+	_, err = s.queries.GetOrder(
+		ctx,
+		orderID,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.Order{}, ErrOrderNotFound
+	}
+
+	if err != nil {
+		return db.Order{}, fmt.Errorf(
+			"get order after confirm failure: %w",
+			err,
+		)
+	}
+
+	return db.Order{}, ErrInvalidOrderState
 }
