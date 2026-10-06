@@ -17,6 +17,7 @@ import (
 
 type Handler struct {
 	paymentService     *payment.Service
+	refundService      *payment.RefundService
 	reservationService *reservation.Service
 	cartService        *cart.Service
 	checkoutService    *checkout.Service
@@ -25,6 +26,7 @@ type Handler struct {
 
 func NewHandler(
 	paymentService *payment.Service,
+	refundService *payment.RefundService,
 	reservationService *reservation.Service,
 	cartService *cart.Service,
 	checkoutService *checkout.Service,
@@ -32,6 +34,7 @@ func NewHandler(
 ) *Handler {
 	return &Handler{
 		paymentService:     paymentService,
+		refundService:      refundService,
 		reservationService: reservationService,
 		cartService:        cartService,
 		checkoutService:    checkoutService,
@@ -230,6 +233,137 @@ func (h *Handler) CreatePayment(c *gin.Context) {
 			"provider_payment_id": paymentRecord.ProviderPaymentID,
 			"amount":              paymentRecord.Amount,
 			"currency":            paymentRecord.Currency,
+		},
+	)
+}
+
+func (h *Handler) CreateRefund(c *gin.Context) {
+	paymentID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_PAYMENT_ID",
+			"invalid payment id",
+		)
+		return
+	}
+
+	idempotencyKey := c.GetHeader("Idempotency-Key")
+	if idempotencyKey == "" {
+		writeError(
+			c,
+			http.StatusBadRequest,
+			"INVALID_IDEMPOTENCY_KEY",
+			"Idempotency-Key header is required",
+		)
+		return
+	}
+
+	refundRecord, err := h.refundService.CreateRefund(
+		c.Request.Context(),
+		pgtype.UUID{
+			Bytes: paymentID,
+			Valid: true,
+		},
+		idempotencyKey,
+	)
+	if err != nil {
+		if errors.Is(err, payment.ErrInvalidIdempotency) {
+			writeError(
+				c,
+				http.StatusBadRequest,
+				"INVALID_IDEMPOTENCY_KEY",
+				"invalid idempotency key",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrPaymentNotFound) {
+			writeError(
+				c,
+				http.StatusNotFound,
+				"PAYMENT_NOT_FOUND",
+				"payment not found",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrPaymentNotRefundable) {
+			writeError(
+				c,
+				http.StatusConflict,
+				"PAYMENT_NOT_REFUNDABLE",
+				"payment is not refundable",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrOrderNotRefundable) {
+			writeError(
+				c,
+				http.StatusConflict,
+				"ORDER_NOT_REFUNDABLE",
+				"order is not refundable",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrRefundAlreadyExists) {
+			writeError(
+				c,
+				http.StatusConflict,
+				"REFUND_ALREADY_EXISTS",
+				"refund already exists",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrProviderFailed) {
+			writeError(
+				c,
+				http.StatusBadGateway,
+				"REFUND_FAILED",
+				"payment provider failed to process refund",
+			)
+			return
+		}
+
+		if errors.Is(err, payment.ErrProviderUnknown) {
+			c.JSON(
+				http.StatusAccepted,
+				gin.H{
+					"id":                 refundRecord.ID,
+					"payment_id":         refundRecord.PaymentID,
+					"status":             refundRecord.Status,
+					"provider_refund_id": refundRecord.ProviderRefundID,
+					"amount":             refundRecord.Amount,
+					"currency":           refundRecord.Currency,
+					"idempotency_key":    refundRecord.IdempotencyKey,
+				},
+			)
+			return
+		}
+
+		writeError(
+			c,
+			http.StatusInternalServerError,
+			"REFUND_FAILED",
+			"refund processing failed",
+		)
+		return
+	}
+
+	c.JSON(
+		http.StatusOK,
+		gin.H{
+			"id":                 refundRecord.ID,
+			"payment_id":         refundRecord.PaymentID,
+			"status":             refundRecord.Status,
+			"provider_refund_id": refundRecord.ProviderRefundID,
+			"amount":             refundRecord.Amount,
+			"currency":           refundRecord.Currency,
+			"idempotency_key":    refundRecord.IdempotencyKey,
 		},
 	)
 }

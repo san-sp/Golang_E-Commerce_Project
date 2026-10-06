@@ -54,6 +54,12 @@ func main() {
 		paymentProvider,
 	)
 
+	refundService := payment.NewRefundService(
+		pool,
+		queries,
+		paymentProvider,
+	)
+
 	reservationService := reservation.NewService(
 		pool,
 		queries,
@@ -79,6 +85,7 @@ func main() {
 
 	handler := apphttp.NewHandler(
 		paymentService,
+		refundService,
 		reservationService,
 		cartService,
 		checkoutService,
@@ -110,6 +117,7 @@ func main() {
 
 	// Payment
 	api.POST("/payments", handler.CreatePayment)
+	api.POST("/payments/:id/refund", handler.CreateRefund)
 	api.POST("/payments/webhook", handler.PaymentWebhook)
 
 	// Order

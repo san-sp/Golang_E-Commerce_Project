@@ -84,6 +84,7 @@ func setupCheckoutHandler(t *testing.T) (
 
 	handler := NewHandler(
 		paymentService,
+		nil,
 		reservationService,
 		nil,
 		checkoutService,
@@ -135,6 +136,7 @@ func TestCreateReservationHandler(t *testing.T) {
 	)
 
 	handler := NewHandler(
+		nil,
 		nil,
 		reservationService,
 		nil,
@@ -264,6 +266,7 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 	)
 
 	handler := NewHandler(
+		nil,
 		nil,
 		reservationService,
 		nil,
