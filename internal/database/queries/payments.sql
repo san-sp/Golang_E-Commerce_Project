@@ -17,6 +17,21 @@ VALUES (
 )
 RETURNING *;
 
+-- name: GetPayment :one
+SELECT
+    id,
+    reservation_id,
+    provider,
+    provider_payment_id,
+    amount,
+    currency,
+    status,
+    created_at,
+    updated_at,
+    order_id
+FROM payments
+WHERE id = $1;
+
 -- name: UpdatePaymentProviderID :one
 UPDATE payments
 SET

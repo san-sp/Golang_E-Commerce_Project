@@ -46,6 +46,22 @@ RETURNING
     updated_at;
 
 
+-- name: RefundOrder :one
+UPDATE orders
+SET
+    status = 'REFUNDED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'CONFIRMED'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at;    
+
+
 -- name: CancelOrder :one
 UPDATE orders
 SET

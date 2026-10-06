@@ -25,6 +25,20 @@ RETURNING
     updated_at;
 
 
+-- name: RestoreInventory :one
+UPDATE inventory
+SET
+    quantity = quantity + $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at;
+        
+
 -- name: GetActiveReservedQuantity :one
 SELECT
     COALESCE(SUM(quantity), 0)::BIGINT AS reserved_quantity

@@ -417,3 +417,35 @@ func (q *Queries) GetReservationsByOrderID(ctx context.Context, orderID pgtype.U
 	}
 	return items, nil
 }
+
+const restoreInventory = `-- name: RestoreInventory :one
+UPDATE inventory
+SET
+    quantity = quantity + $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at
+`
+
+type RestoreInventoryParams struct {
+	VariantID pgtype.UUID
+	Quantity  int64
+}
+
+func (q *Queries) RestoreInventory(ctx context.Context, arg RestoreInventoryParams) (Inventory, error) {
+	row := q.db.QueryRow(ctx, restoreInventory, arg.VariantID, arg.Quantity)
+	var i Inventory
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.Quantity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

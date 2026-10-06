@@ -40,3 +40,21 @@ func (m *MockProvider) CreatePayment(
 
 	return "mock_payment_" + uuid.NewString(), nil
 }
+
+func (m *MockProvider) RefundPayment(
+	ctx context.Context,
+	providerPaymentID string,
+	amount int64,
+	currency string,
+	idempotencyKey string,
+) (string, error) {
+	switch m.failureMode {
+	case "failed":
+		return "", ErrProviderFailed
+
+	case "unknown":
+		return "", ErrProviderUnknown
+	}
+
+	return "mock_refund_" + uuid.NewString(), nil
+}

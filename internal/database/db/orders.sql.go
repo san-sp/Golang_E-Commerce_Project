@@ -227,3 +227,33 @@ func (q *Queries) GetOrderItems(ctx context.Context, orderID pgtype.UUID) ([]Ord
 	}
 	return items, nil
 }
+
+const refundOrder = `-- name: RefundOrder :one
+UPDATE orders
+SET
+    status = 'REFUNDED',
+    updated_at = NOW()
+WHERE id = $1
+  AND status = 'CONFIRMED'
+RETURNING
+    id,
+    status,
+    total_amount,
+    currency,
+    created_at,
+    updated_at
+`
+
+func (q *Queries) RefundOrder(ctx context.Context, id pgtype.UUID) (Order, error) {
+	row := q.db.QueryRow(ctx, refundOrder, id)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.TotalAmount,
+		&i.Currency,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}

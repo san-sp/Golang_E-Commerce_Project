@@ -116,6 +116,18 @@ type ProductVariant struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type Refund struct {
+	ID               pgtype.UUID
+	PaymentID        pgtype.UUID
+	ProviderRefundID pgtype.Text
+	Amount           int64
+	Currency         string
+	Status           string
+	IdempotencyKey   string
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
 type Reservation struct {
 	ID        pgtype.UUID
 	VariantID pgtype.UUID

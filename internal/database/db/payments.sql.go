@@ -65,6 +65,40 @@ func (q *Queries) CreatePayment(ctx context.Context, arg CreatePaymentParams) (P
 	return i, err
 }
 
+const getPayment = `-- name: GetPayment :one
+SELECT
+    id,
+    reservation_id,
+    provider,
+    provider_payment_id,
+    amount,
+    currency,
+    status,
+    created_at,
+    updated_at,
+    order_id
+FROM payments
+WHERE id = $1
+`
+
+func (q *Queries) GetPayment(ctx context.Context, id pgtype.UUID) (Payment, error) {
+	row := q.db.QueryRow(ctx, getPayment, id)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.ReservationID,
+		&i.Provider,
+		&i.ProviderPaymentID,
+		&i.Amount,
+		&i.Currency,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OrderID,
+	)
+	return i, err
+}
+
 const markPaymentFailed = `-- name: MarkPaymentFailed :one
 UPDATE payments
 SET

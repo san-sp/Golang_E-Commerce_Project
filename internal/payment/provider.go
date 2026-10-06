@@ -16,4 +16,12 @@ type PaymentProvider interface {
 		amount int64,
 		currency string,
 	) (string, error)
+
+	RefundPayment(
+		ctx context.Context,
+		providerPaymentID string,
+		amount int64,
+		currency string,
+		idempotencyKey string,
+	) (string, error)
 }
