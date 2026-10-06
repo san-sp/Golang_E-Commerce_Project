@@ -198,6 +198,27 @@ func (s *Service) ProcessPaymentWebhook(
 	}
 
 	for _, reservation := range reservations {
+		_, err = txQueries.ConsumeInventory(
+			ctx,
+			db.ConsumeInventoryParams{
+				VariantID: reservation.VariantID,
+				Quantity:  reservation.Quantity,
+			},
+		)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.Payment{}, fmt.Errorf(
+					"insufficient inventory for variant %s",
+					reservation.VariantID,
+				)
+			}
+
+			return db.Payment{}, fmt.Errorf(
+				"consume inventory: %w",
+				err,
+			)
+		}
+
 		_, err = txQueries.ConfirmReservation(
 			ctx,
 			reservation.ID,

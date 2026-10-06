@@ -10,6 +10,21 @@ WHERE variant_id = $1
 FOR UPDATE;
 
 
+-- name: ConsumeInventory :one
+UPDATE inventory
+SET
+    quantity = quantity - $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+  AND quantity >= $2
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at;
+
+
 -- name: GetActiveReservedQuantity :one
 SELECT
     COALESCE(SUM(quantity), 0)::BIGINT AS reserved_quantity

@@ -80,6 +80,39 @@ func (q *Queries) ConfirmReservation(ctx context.Context, id pgtype.UUID) (Reser
 	return i, err
 }
 
+const consumeInventory = `-- name: ConsumeInventory :one
+UPDATE inventory
+SET
+    quantity = quantity - $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+  AND quantity >= $2
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at
+`
+
+type ConsumeInventoryParams struct {
+	VariantID pgtype.UUID
+	Quantity  int64
+}
+
+func (q *Queries) ConsumeInventory(ctx context.Context, arg ConsumeInventoryParams) (Inventory, error) {
+	row := q.db.QueryRow(ctx, consumeInventory, arg.VariantID, arg.Quantity)
+	var i Inventory
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.Quantity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createReservation = `-- name: CreateReservation :one
 INSERT INTO reservations (
     variant_id,
