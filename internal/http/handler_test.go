@@ -579,6 +579,316 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 	}
 }
 
+func TestListProductsSortPriceAsc(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	productA, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Price Asc Product A",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product A: %v", err)
+	}
+
+	productB, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Price Asc Product B",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product B: %v", err)
+	}
+
+	testID := uuid.NewString()
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: productA.ID,
+			Sku:       "HTTP-PRICE-ASC-A-" + testID,
+			Price:     1,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant A: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: productB.ID,
+			Sku:       "HTTP-PRICE-ASC-B-" + testID,
+			Price:     2,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant B: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			productA.ID,
+			productB.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			productA.ID,
+			productB.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?page=1&limit=100&sort=price_asc",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	firstIndex := -1
+	secondIndex := -1
+
+	for i, p := range products {
+		if p.ID == productA.ID {
+			firstIndex = i
+		}
+
+		if p.ID == productB.ID {
+			secondIndex = i
+		}
+	}
+
+	if firstIndex == -1 {
+		t.Fatal("product A was not returned")
+	}
+
+	if secondIndex == -1 {
+		t.Fatal("product B was not returned")
+	}
+
+	if firstIndex >= secondIndex {
+		t.Fatalf(
+			"expected product A at index %d before product B at index %d",
+			firstIndex,
+			secondIndex,
+		)
+	}
+}
+
+func TestListProductsSortPriceDesc(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	productA, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Price Desc Product A",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product A: %v", err)
+	}
+
+	productB, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Price Desc Product B",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product B: %v", err)
+	}
+
+	testID := uuid.NewString()
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: productA.ID,
+			Sku:       "HTTP-PRICE-DESC-A-" + testID,
+			Price:     900000001,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant A: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: productB.ID,
+			Sku:       "HTTP-PRICE-DESC-B-" + testID,
+			Price:     900000000,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant B: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			productA.ID,
+			productB.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			productA.ID,
+			productB.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?page=1&limit=100&sort=price_desc",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	firstIndex := -1
+	secondIndex := -1
+
+	for i, p := range products {
+		if p.ID == productA.ID {
+			firstIndex = i
+		}
+
+		if p.ID == productB.ID {
+			secondIndex = i
+		}
+	}
+
+	if firstIndex == -1 {
+		t.Fatal("product A was not returned")
+	}
+
+	if secondIndex == -1 {
+		t.Fatal("product B was not returned")
+	}
+
+	if firstIndex >= secondIndex {
+		t.Fatalf(
+			"expected product A at index %d before product B at index %d",
+			firstIndex,
+			secondIndex,
+		)
+	}
+}
+
 func TestListProductsInvalidSort(t *testing.T) {
 	productService := product.NewService(nil, nil)
 
