@@ -147,6 +147,50 @@ func (q *Queries) GetProductVariant(ctx context.Context, id pgtype.UUID) (Produc
 	return i, err
 }
 
+const listProductVariants = `-- name: ListProductVariants :many
+SELECT
+    id,
+    product_id,
+    sku,
+    size,
+    color,
+    price,
+    created_at,
+    updated_at
+FROM product_variants
+WHERE product_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListProductVariants(ctx context.Context, productID pgtype.UUID) ([]ProductVariant, error) {
+	rows, err := q.db.Query(ctx, listProductVariants, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ProductVariant
+	for rows.Next() {
+		var i ProductVariant
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.Sku,
+			&i.Size,
+			&i.Color,
+			&i.Price,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listProducts = `-- name: ListProducts :many
 SELECT
     id,

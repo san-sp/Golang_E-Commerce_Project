@@ -133,6 +133,29 @@ func (h *Handler) ListProducts(c *gin.Context) {
 	c.JSON(http.StatusOK, products)
 }
 
+func (h *Handler) ListProductVariants(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid product ID",
+		})
+		return
+	}
+
+	variants, err := h.productService.ListProductVariants(
+		c.Request.Context(),
+		productID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, variants)
+}
+
 // Cart
 func (h *Handler) CreateCart(c *gin.Context) {
 	cart, err := h.cartService.CreateCart(
@@ -870,7 +893,6 @@ func (h *Handler) PaymentWebhook(c *gin.Context) {
 }
 
 // Refund
-
 func (h *Handler) CreateRefund(c *gin.Context) {
 	paymentID, err := uuid.Parse(c.Param("id"))
 	if err != nil {

@@ -442,6 +442,223 @@ func TestListProductsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestListProductVariants(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	productRecord, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Variant Product",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	variantRecord, err := queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: productRecord.ID,
+			Sku:       "HTTP-VARIANT-" + uuid.NewString(),
+			Price:     129900,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id = $1`,
+			variantRecord.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productRecord.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products/:id/variants",
+		handler.ListProductVariants,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products/"+uuid.UUID(productRecord.ID.Bytes).String()+"/variants",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if recorder.Body.Len() == 0 {
+		t.Fatal("expected response body")
+	}
+}
+
+func TestListProductVariantsInvalidID(t *testing.T) {
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products/:id/variants",
+		handler.ListProductVariants,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products/not-a-uuid/variants",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d",
+			recorder.Code,
+		)
+	}
+}
+
+func TestListProductVariantsEmpty(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	productRecord, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Empty Variant Product",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productRecord.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products/:id/variants",
+		handler.ListProductVariants,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products/"+uuid.UUID(productRecord.ID.Bytes).String()+"/variants",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	if recorder.Body.String() != "[]" {
+		t.Fatalf(
+			"expected empty JSON array, got %s",
+			recorder.Body.String(),
+		)
+	}
+}
+
 // Checkout
 func TestCheckoutHandlerSuccess(t *testing.T) {
 	handler, queries, _, pool := setupCheckoutHandler(t)

@@ -131,6 +131,7 @@ func main() {
 	// Product
 	api.GET("/products", handler.ListProducts)
 	api.GET("/products/:id", handler.GetProduct)
+	api.GET("/products/:id/variants", handler.ListProductVariants)
 
 	server := &http.Server{
 		Addr:              ":8080",

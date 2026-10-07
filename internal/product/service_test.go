@@ -314,3 +314,146 @@ func TestGetProductVariantNotFound(t *testing.T) {
 		)
 	}
 }
+
+func TestListProductVariants(t *testing.T) {
+	ctx, pool, queries, cleanup := setupProductTest(t)
+	defer cleanup()
+
+	product, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Variant Test Product",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	variantA, err := queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: product.ID,
+			Sku:       "VARIANT-A-" + uuid.NewString(),
+			Size: pgtype.Text{
+				String: "M",
+				Valid:  true,
+			},
+			Color: pgtype.Text{
+				String: "Black",
+				Valid:  true,
+			},
+			Price: 99900,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant A: %v", err)
+	}
+
+	variantB, err := queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: product.ID,
+			Sku:       "VARIANT-B-" + uuid.NewString(),
+			Size: pgtype.Text{
+				String: "L",
+				Valid:  true,
+			},
+			Color: pgtype.Text{
+				String: "White",
+				Valid:  true,
+			},
+			Price: 109900,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create variant B: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id IN ($1, $2)`,
+			variantA.ID,
+			variantB.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			product.ID,
+		)
+	})
+
+	service := NewService(pool, queries)
+
+	variants, err := service.ListProductVariants(
+		ctx,
+		uuid.UUID(product.ID.Bytes),
+	)
+	if err != nil {
+		t.Fatalf("list product variants: %v", err)
+	}
+
+	if len(variants) != 2 {
+		t.Fatalf(
+			"expected 2 variants, got %d",
+			len(variants),
+		)
+	}
+
+	if variants[0].Sku != variantA.Sku {
+		t.Fatalf(
+			"expected first SKU %s, got %s",
+			variantA.Sku,
+			variants[0].Sku,
+		)
+	}
+
+	if variants[1].Sku != variantB.Sku {
+		t.Fatalf(
+			"expected second SKU %s, got %s",
+			variantB.Sku,
+			variants[1].Sku,
+		)
+	}
+}
+
+func TestListProductVariantsReturnsEmptyList(t *testing.T) {
+	ctx, pool, queries, cleanup := setupProductTest(t)
+	defer cleanup()
+
+	product, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Product Without Variants",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			product.ID,
+		)
+	})
+
+	service := NewService(pool, queries)
+
+	variants, err := service.ListProductVariants(
+		ctx,
+		uuid.UUID(product.ID.Bytes),
+	)
+	if err != nil {
+		t.Fatalf("list product variants: %v", err)
+	}
+
+	if len(variants) != 0 {
+		t.Fatalf(
+			"expected 0 variants, got %d",
+			len(variants),
+		)
+	}
+}

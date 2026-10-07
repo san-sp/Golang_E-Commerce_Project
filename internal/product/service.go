@@ -86,3 +86,27 @@ func (s *Service) GetProductVariant(ctx context.Context, id uuid.UUID) (db.Produ
 
 	return variant, nil
 }
+
+func (s *Service) ListProductVariants(
+	ctx context.Context,
+	productID uuid.UUID,
+) ([]db.ProductVariant, error) {
+	variantProductID := pgtype.UUID{
+		Bytes: productID,
+		Valid: true,
+	}
+
+	variants, err := s.queries.ListProductVariants(
+		ctx,
+		variantProductID,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if variants == nil {
+		variants = []db.ProductVariant{}
+	}
+
+	return variants, nil
+}

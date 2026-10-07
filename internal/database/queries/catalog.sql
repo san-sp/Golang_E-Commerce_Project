@@ -11,25 +11,6 @@ RETURNING
     created_at,
     updated_at;
 
--- name: CreateProductVariant :one
-INSERT INTO product_variants (
-    product_id,
-    sku,
-    size,
-    color,
-    price
-)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING
-    id,
-    product_id,
-    sku,
-    size,
-    color,
-    price,
-    created_at,
-    updated_at;
-
 -- name: ListProducts :many
 SELECT
     id,
@@ -52,6 +33,40 @@ SELECT
 FROM products
 WHERE id = $1;
 
+
+-- name: CreateProductVariant :one
+INSERT INTO product_variants (
+    product_id,
+    sku,
+    size,
+    color,
+    price
+)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING
+    id,
+    product_id,
+    sku,
+    size,
+    color,
+    price,
+    created_at,
+    updated_at;
+
+-- name: ListProductVariants :many
+SELECT
+    id,
+    product_id,
+    sku,
+    size,
+    color,
+    price,
+    created_at,
+    updated_at
+FROM product_variants
+WHERE product_id = $1
+ORDER BY created_at ASC;
+  
 -- name: GetProductVariant :one
 SELECT
     id,
