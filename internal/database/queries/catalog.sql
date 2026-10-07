@@ -19,9 +19,61 @@ SELECT
     created_at,
     updated_at
 FROM products
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT $1
 OFFSET $2;    
+
+-- name: ListProductsAsc :many
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+ORDER BY created_at ASC, id ASC
+LIMIT $1
+OFFSET $2;
+
+-- name: ListProductsPriceAsc :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_variants pv
+    ON pv.product_id = p.id
+GROUP BY
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+ORDER BY MIN(pv.price) ASC, p.id ASC
+LIMIT $1
+OFFSET $2;
+
+-- name: ListProductsPriceDesc :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_variants pv
+    ON pv.product_id = p.id
+GROUP BY
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+ORDER BY MIN(pv.price) DESC, p.id DESC
+LIMIT $1
+OFFSET $2;
 
 -- name: GetProduct :one
 SELECT

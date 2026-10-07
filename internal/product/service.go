@@ -16,6 +16,7 @@ var (
 	ErrProductVariantNotFound = errors.New("product variant not found")
 	ErrInvalidPage            = errors.New("page must be greater than zero")
 	ErrInvalidLimit           = errors.New("limit must be between 1 and 100")
+	ErrInvalidProductSort     = errors.New("invalid product sort")
 )
 
 type Service struct {
@@ -48,6 +49,7 @@ func (s *Service) ListProducts(
 	ctx context.Context,
 	page int,
 	limit int,
+	sort string,
 ) ([]db.Product, error) {
 	if page < 1 {
 		return nil, ErrInvalidPage
@@ -57,17 +59,52 @@ func (s *Service) ListProducts(
 		return nil, ErrInvalidLimit
 	}
 
+	if sort == "" {
+		sort = "created_desc"
+	}
+
 	offset := (page - 1) * limit
 
-	products, err := s.queries.ListProducts(
-		ctx,
-		db.ListProductsParams{
+	var (
+		products []db.Product
+		err      error
+	)
+
+	switch sort {
+	case "created_desc":
+		products, err = s.queries.ListProducts(ctx, db.ListProductsParams{
 			Limit:  int32(limit),
 			Offset: int32(offset),
-		},
-	)
+		})
+
+	case "created_asc":
+		products, err = s.queries.ListProductsAsc(ctx, db.ListProductsAscParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+
+	case "price_asc":
+		products, err = s.queries.ListProductsPriceAsc(ctx, db.ListProductsPriceAscParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+
+	case "price_desc":
+		products, err = s.queries.ListProductsPriceDesc(ctx, db.ListProductsPriceDescParams{
+			Limit:  int32(limit),
+			Offset: int32(offset),
+		})
+
+	default:
+		return nil, ErrInvalidProductSort
+	}
+
 	if err != nil {
 		return nil, err
+	}
+
+	if products == nil {
+		products = []db.Product{}
 	}
 
 	return products, nil

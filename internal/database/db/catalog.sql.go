@@ -199,7 +199,7 @@ SELECT
     created_at,
     updated_at
 FROM products
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
 LIMIT $1
 OFFSET $2
 `
@@ -211,6 +211,154 @@ type ListProductsParams struct {
 
 func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]Product, error) {
 	rows, err := q.db.Query(ctx, listProducts, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProductsAsc = `-- name: ListProductsAsc :many
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+ORDER BY created_at ASC, id ASC
+LIMIT $1
+OFFSET $2
+`
+
+type ListProductsAscParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListProductsAsc(ctx context.Context, arg ListProductsAscParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listProductsAsc, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProductsPriceAsc = `-- name: ListProductsPriceAsc :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_variants pv
+    ON pv.product_id = p.id
+GROUP BY
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+ORDER BY MIN(pv.price) ASC, p.id ASC
+LIMIT $1
+OFFSET $2
+`
+
+type ListProductsPriceAscParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListProductsPriceAsc(ctx context.Context, arg ListProductsPriceAscParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listProductsPriceAsc, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProductsPriceDesc = `-- name: ListProductsPriceDesc :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_variants pv
+    ON pv.product_id = p.id
+GROUP BY
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+ORDER BY MIN(pv.price) DESC, p.id DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListProductsPriceDescParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListProductsPriceDesc(ctx context.Context, arg ListProductsPriceDescParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listProductsPriceDesc, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

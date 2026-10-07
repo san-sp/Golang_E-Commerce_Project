@@ -79,6 +79,7 @@ func (h *Handler) GetProduct(c *gin.Context) {
 func (h *Handler) ListProducts(c *gin.Context) {
 	page := 1
 	limit := 20
+	sort := c.Query("sort")
 
 	if value := c.Query("page"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -108,6 +109,7 @@ func (h *Handler) ListProducts(c *gin.Context) {
 		c.Request.Context(),
 		page,
 		limit,
+		sort,
 	)
 	if err != nil {
 		switch {
@@ -117,6 +119,11 @@ func (h *Handler) ListProducts(c *gin.Context) {
 			})
 
 		case errors.Is(err, productpkg.ErrInvalidLimit):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, productpkg.ErrInvalidProductSort):
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})
