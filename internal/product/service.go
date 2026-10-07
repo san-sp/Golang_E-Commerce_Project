@@ -19,6 +19,7 @@ var (
 	ErrInvalidLimit           = errors.New("limit must be between 1 and 100")
 	ErrInvalidProductSort     = errors.New("invalid product sort")
 	ErrInvalidProductSearch   = errors.New("search term cannot be empty")
+	ErrInvalidMinPrice        = errors.New("min price must be greater than or equal to zero")
 )
 
 type Service struct {
@@ -141,6 +142,45 @@ func (s *Service) SearchProducts(
 				String: search,
 				Valid:  true,
 			},
+			PageLimit:  int32(limit),
+			PageOffset: int32(offset),
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	if products == nil {
+		products = []db.Product{}
+	}
+
+	return products, nil
+}
+
+func (s *Service) ListProductsMinPrice(
+	ctx context.Context,
+	minPrice int64,
+	page int,
+	limit int,
+) ([]db.Product, error) {
+	if minPrice < 0 {
+		return nil, ErrInvalidMinPrice
+	}
+
+	if page < 1 {
+		return nil, ErrInvalidPage
+	}
+
+	if limit < 1 || limit > 100 {
+		return nil, ErrInvalidLimit
+	}
+
+	offset := (page - 1) * limit
+
+	products, err := s.queries.ListProductsMinPrice(
+		ctx,
+		db.ListProductsMinPriceParams{
+			MinPrice:   minPrice,
 			PageLimit:  int32(limit),
 			PageOffset: int32(offset),
 		},

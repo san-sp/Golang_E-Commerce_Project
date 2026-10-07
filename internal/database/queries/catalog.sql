@@ -48,6 +48,27 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(page_limit)
 OFFSET sqlc.arg(page_offset);
 
+-- name: ListProductsMinPrice :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_variants pv
+    ON pv.product_id = p.id
+GROUP BY
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+HAVING MIN(pv.price) >= sqlc.arg(min_price)
+ORDER BY p.created_at DESC, p.id DESC
+LIMIT sqlc.arg(page_limit)
+OFFSET sqlc.arg(page_offset);
+
 -- name: ListProductsPriceAsc :many
 SELECT
     p.id,

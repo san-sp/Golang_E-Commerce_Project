@@ -1141,6 +1141,301 @@ func TestListProductsSearchRejectsWhitespace(t *testing.T) {
 	}
 }
 
+func TestListProductsMinPrice(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	testID := uuid.NewString()
+
+	qualifyingProduct, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Min Price Qualifying " + testID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create qualifying product: %v", err)
+	}
+
+	nonQualifyingProduct, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "HTTP Min Price Non Qualifying " + testID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create non-qualifying product: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: qualifyingProduct.ID,
+			Sku:       "HTTP-MIN-QUALIFY-1-" + testID,
+			Price:     60000,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create qualifying variant 1: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: qualifyingProduct.ID,
+			Sku:       "HTTP-MIN-QUALIFY-2-" + testID,
+			Price:     80000,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create qualifying variant 2: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: nonQualifyingProduct.ID,
+			Sku:       "HTTP-MIN-NON-QUALIFY-1-" + testID,
+			Price:     40000,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create non-qualifying variant: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			qualifyingProduct.ID,
+			nonQualifyingProduct.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			qualifyingProduct.ID,
+			nonQualifyingProduct.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?page=1&limit=100&min_price=60000",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	foundQualifying := false
+	foundNonQualifying := false
+
+	for _, p := range products {
+		if p.ID == qualifyingProduct.ID {
+			foundQualifying = true
+		}
+
+		if p.ID == nonQualifyingProduct.ID {
+			foundNonQualifying = true
+		}
+	}
+
+	if !foundQualifying {
+		t.Fatal("expected qualifying product to be returned")
+	}
+
+	if foundNonQualifying {
+		t.Fatal("did not expect non-qualifying product to be returned")
+	}
+}
+
+func TestListProductsMinPriceInvalidValue(t *testing.T) {
+	productService := product.NewService(nil, nil)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?min_price=abc",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestListProductsMinPriceNegative(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?min_price=-1",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestListProductsSearchAndMinPriceCannotBeCombined(t *testing.T) {
+	productService := product.NewService(nil, nil)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?search=shirt&min_price=60000",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
 func TestListProductsInvalidSort(t *testing.T) {
 	productService := product.NewService(nil, nil)
 

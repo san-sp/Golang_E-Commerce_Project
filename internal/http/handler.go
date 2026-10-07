@@ -82,6 +82,7 @@ func (h *Handler) ListProducts(c *gin.Context) {
 	limit := 20
 	sort := c.Query("sort")
 	search := c.Query("search")
+	minPriceParam := c.Query("min_price")
 
 	if value := c.Query("page"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -110,16 +111,44 @@ func (h *Handler) ListProducts(c *gin.Context) {
 	var (
 		products []db.Product
 		err      error
+		minPrice int64
 	)
 
-	if search != "" {
+	if minPriceParam != "" {
+		minPrice, err = strconv.ParseInt(minPriceParam, 10, 64)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid min_price",
+			})
+			return
+		}
+	}
+
+	if search != "" && minPriceParam != "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "search and min_price cannot be used together",
+		})
+		return
+	}
+
+	switch {
+	case search != "":
 		products, err = h.productService.SearchProducts(
 			c.Request.Context(),
 			search,
 			page,
 			limit,
 		)
-	} else {
+
+	case minPriceParam != "":
+		products, err = h.productService.ListProductsMinPrice(
+			c.Request.Context(),
+			minPrice,
+			page,
+			limit,
+		)
+
+	default:
 		products, err = h.productService.ListProducts(
 			c.Request.Context(),
 			page,
@@ -145,6 +174,11 @@ func (h *Handler) ListProducts(c *gin.Context) {
 			})
 
 		case errors.Is(err, productpkg.ErrInvalidProductSearch):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, productpkg.ErrInvalidMinPrice):
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})

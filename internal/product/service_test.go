@@ -285,6 +285,158 @@ func TestSearchProductsRejectsInvalidLimit(t *testing.T) {
 	}
 }
 
+func TestListProductsMinPrice(t *testing.T) {
+	ctx, pool, queries, cleanup := setupProductTest(t)
+	defer cleanup()
+
+	service := NewService(pool, queries)
+
+	testID := uuid.NewString()
+
+	qualifyingProduct, err := queries.CreateProduct(ctx, db.CreateProductParams{
+		Name:        "Min Price Qualifying " + testID,
+		Description: pgtype.Text{String: "Should be returned", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create qualifying product: %v", err)
+	}
+
+	nonQualifyingProduct, err := queries.CreateProduct(ctx, db.CreateProductParams{
+		Name:        "Min Price Non Qualifying " + testID,
+		Description: pgtype.Text{String: "Should not be returned", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create non-qualifying product: %v", err)
+	}
+
+	// Qualifying product:
+	// variants = 60000 and 80000 paise
+	// MIN(price) = 60000
+	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
+		ProductID: qualifyingProduct.ID,
+		Sku:       "MIN-PRICE-QUALIFY-1-" + testID,
+		Price:     60000,
+	})
+	if err != nil {
+		t.Fatalf("failed to create qualifying variant 1: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
+		ProductID: qualifyingProduct.ID,
+		Sku:       "MIN-PRICE-QUALIFY-2-" + testID,
+		Price:     80000,
+	})
+	if err != nil {
+		t.Fatalf("failed to create qualifying variant 2: %v", err)
+	}
+
+	// Non-qualifying product:
+	// variants = 40000 and 90000 paise
+	// MIN(price) = 40000
+	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
+		ProductID: nonQualifyingProduct.ID,
+		Sku:       "MIN-PRICE-NON-QUALIFY-1-" + testID,
+		Price:     40000,
+	})
+	if err != nil {
+		t.Fatalf("failed to create non-qualifying variant 1: %v", err)
+	}
+
+	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
+		ProductID: nonQualifyingProduct.ID,
+		Sku:       "MIN-PRICE-NON-QUALIFY-2-" + testID,
+		Price:     90000,
+	})
+	if err != nil {
+		t.Fatalf("failed to create non-qualifying variant 2: %v", err)
+	}
+
+	products, err := service.ListProductsMinPrice(
+		ctx,
+		60000,
+		1,
+		100,
+	)
+	if err != nil {
+		t.Fatalf("ListProductsMinPrice failed: %v", err)
+	}
+
+	foundQualifying := false
+	foundNonQualifying := false
+
+	for _, product := range products {
+		if product.ID == qualifyingProduct.ID {
+			foundQualifying = true
+		}
+
+		if product.ID == nonQualifyingProduct.ID {
+			foundNonQualifying = true
+		}
+	}
+
+	if !foundQualifying {
+		t.Fatal("expected qualifying product to be returned")
+	}
+
+	if foundNonQualifying {
+		t.Fatal("did not expect non-qualifying product to be returned")
+	}
+}
+
+func TestListProductsMinPriceRejectsNegativePrice(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.ListProductsMinPrice(
+		context.Background(),
+		-1,
+		1,
+		20,
+	)
+
+	if !errors.Is(err, ErrInvalidMinPrice) {
+		t.Fatalf(
+			"expected ErrInvalidMinPrice, got %v",
+			err,
+		)
+	}
+}
+
+func TestListProductsMinPriceRejectsInvalidPage(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.ListProductsMinPrice(
+		context.Background(),
+		50000,
+		0,
+		20,
+	)
+
+	if !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf(
+			"expected ErrInvalidPage, got %v",
+			err,
+		)
+	}
+}
+
+func TestListProductsMinPriceRejectsInvalidLimit(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.ListProductsMinPrice(
+		context.Background(),
+		50000,
+		1,
+		101,
+	)
+
+	if !errors.Is(err, ErrInvalidLimit) {
+		t.Fatalf(
+			"expected ErrInvalidLimit, got %v",
+			err,
+		)
+	}
+}
+
 func TestListProductsRejectsInvalidPage(t *testing.T) {
 	ctx, _, queries, cleanup := setupProductTest(t)
 	defer cleanup()
