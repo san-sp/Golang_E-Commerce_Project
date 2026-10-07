@@ -382,3 +382,49 @@ func (q *Queries) ListProductsPriceDesc(ctx context.Context, arg ListProductsPri
 	}
 	return items, nil
 }
+
+const searchProducts = `-- name: SearchProducts :many
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+WHERE name ILIKE '%' || $1 || '%'
+ORDER BY created_at DESC, id DESC
+LIMIT $3
+OFFSET $2
+`
+
+type SearchProductsParams struct {
+	SearchTerm pgtype.Text
+	PageOffset int32
+	PageLimit  int32
+}
+
+func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, searchProducts, arg.SearchTerm, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

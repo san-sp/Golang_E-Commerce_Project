@@ -889,6 +889,258 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 	}
 }
 
+func TestListProductsSearch(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	testID := uuid.NewString()
+
+	shirt, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Premium Shirt " + testID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create shirt product: %v", err)
+	}
+
+	shoes, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Running Shoes " + testID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create shoes product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			shirt.ID,
+			shoes.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?page=1&limit=100&search=shirt",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	foundShirt := false
+	foundShoes := false
+
+	for _, p := range products {
+		if p.ID == shirt.ID {
+			foundShirt = true
+		}
+
+		if p.ID == shoes.ID {
+			foundShoes = true
+		}
+	}
+
+	if !foundShirt {
+		t.Fatal("expected shirt product to be returned")
+	}
+
+	if foundShoes {
+		t.Fatal("did not expect shoes product to be returned")
+	}
+}
+
+func TestListProductsSearchIsCaseInsensitive(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	testID := uuid.NewString()
+
+	productRecord, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Premium Shirt " + testID,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productRecord.ID,
+		)
+	})
+
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?page=1&limit=100&search=SHIRT",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &products); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	found := false
+
+	for _, p := range products {
+		if p.ID == productRecord.ID {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("expected case-insensitive search to return product")
+	}
+}
+
+func TestListProductsSearchRejectsWhitespace(t *testing.T) {
+	productService := product.NewService(nil, nil)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+	)
+
+	router := gin.New()
+
+	router.GET(
+		"/api/v1/products",
+		handler.ListProducts,
+	)
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products?search=%20%20%20",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status 400, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
 func TestListProductsInvalidSort(t *testing.T) {
 	productService := product.NewService(nil, nil)
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/product"
@@ -80,6 +81,7 @@ func (h *Handler) ListProducts(c *gin.Context) {
 	page := 1
 	limit := 20
 	sort := c.Query("sort")
+	search := c.Query("search")
 
 	if value := c.Query("page"); value != "" {
 		parsed, err := strconv.Atoi(value)
@@ -105,12 +107,26 @@ func (h *Handler) ListProducts(c *gin.Context) {
 		limit = parsed
 	}
 
-	products, err := h.productService.ListProducts(
-		c.Request.Context(),
-		page,
-		limit,
-		sort,
+	var (
+		products []db.Product
+		err      error
 	)
+
+	if search != "" {
+		products, err = h.productService.SearchProducts(
+			c.Request.Context(),
+			search,
+			page,
+			limit,
+		)
+	} else {
+		products, err = h.productService.ListProducts(
+			c.Request.Context(),
+			page,
+			limit,
+			sort,
+		)
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, productpkg.ErrInvalidPage):
@@ -124,6 +140,11 @@ func (h *Handler) ListProducts(c *gin.Context) {
 			})
 
 		case errors.Is(err, productpkg.ErrInvalidProductSort):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, productpkg.ErrInvalidProductSearch):
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})

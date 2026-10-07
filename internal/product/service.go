@@ -3,6 +3,7 @@ package product
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,6 +18,7 @@ var (
 	ErrInvalidPage            = errors.New("page must be greater than zero")
 	ErrInvalidLimit           = errors.New("limit must be between 1 and 100")
 	ErrInvalidProductSort     = errors.New("invalid product sort")
+	ErrInvalidProductSearch   = errors.New("search term cannot be empty")
 )
 
 type Service struct {
@@ -99,6 +101,50 @@ func (s *Service) ListProducts(
 		return nil, ErrInvalidProductSort
 	}
 
+	if err != nil {
+		return nil, err
+	}
+
+	if products == nil {
+		products = []db.Product{}
+	}
+
+	return products, nil
+}
+
+func (s *Service) SearchProducts(
+	ctx context.Context,
+	search string,
+	page int,
+	limit int,
+) ([]db.Product, error) {
+	if page < 1 {
+		return nil, ErrInvalidPage
+	}
+
+	if limit < 1 || limit > 100 {
+		return nil, ErrInvalidLimit
+	}
+
+	search = strings.TrimSpace(search)
+
+	if search == "" {
+		return nil, ErrInvalidProductSearch
+	}
+
+	offset := (page - 1) * limit
+
+	products, err := s.queries.SearchProducts(
+		ctx,
+		db.SearchProductsParams{
+			SearchTerm: pgtype.Text{
+				String: search,
+				Valid:  true,
+			},
+			PageLimit:  int32(limit),
+			PageOffset: int32(offset),
+		},
+	)
 	if err != nil {
 		return nil, err
 	}

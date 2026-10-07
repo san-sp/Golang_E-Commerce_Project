@@ -2,6 +2,7 @@ package product
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -170,6 +171,116 @@ func TestListProducts(t *testing.T) {
 		t.Fatalf(
 			"expected at least 2 products, got %d",
 			len(products),
+		)
+	}
+}
+
+func TestSearchProducts(t *testing.T) {
+	ctx, pool, queries, cleanup := setupProductTest(t)
+	defer cleanup()
+
+	service := NewService(pool, queries)
+
+	testID := uuid.NewString()
+
+	shirt, err := queries.CreateProduct(ctx, db.CreateProductParams{
+		Name:        "Premium Shirt " + testID,
+		Description: pgtype.Text{String: "Search test product", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create shirt product: %v", err)
+	}
+
+	_, err = queries.CreateProduct(ctx, db.CreateProductParams{
+		Name:        "Running Shoes " + testID,
+		Description: pgtype.Text{String: "Another product", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("failed to create shoes product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			shirt.ID,
+		)
+	})
+
+	products, err := service.SearchProducts(
+		ctx,
+		"shirt",
+		1,
+		100,
+	)
+	if err != nil {
+		t.Fatalf("SearchProducts failed: %v", err)
+	}
+
+	found := false
+
+	for _, product := range products {
+		if product.ID == shirt.ID {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		t.Fatal("expected shirt product to be returned")
+	}
+}
+
+func TestSearchProductsRejectsEmptySearch(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.SearchProducts(
+		context.Background(),
+		"   ",
+		1,
+		20,
+	)
+
+	if !errors.Is(err, ErrInvalidProductSearch) {
+		t.Fatalf(
+			"expected ErrInvalidProductSearch, got %v",
+			err,
+		)
+	}
+}
+
+func TestSearchProductsRejectsInvalidPage(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.SearchProducts(
+		context.Background(),
+		"shirt",
+		0,
+		20,
+	)
+
+	if !errors.Is(err, ErrInvalidPage) {
+		t.Fatalf(
+			"expected ErrInvalidPage, got %v",
+			err,
+		)
+	}
+}
+
+func TestSearchProductsRejectsInvalidLimit(t *testing.T) {
+	service := NewService(nil, nil)
+
+	_, err := service.SearchProducts(
+		context.Background(),
+		"shirt",
+		1,
+		101,
+	)
+
+	if !errors.Is(err, ErrInvalidLimit) {
+		t.Fatalf(
+			"expected ErrInvalidLimit, got %v",
+			err,
 		)
 	}
 }

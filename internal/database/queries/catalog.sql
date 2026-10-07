@@ -35,6 +35,19 @@ ORDER BY created_at ASC, id ASC
 LIMIT $1
 OFFSET $2;
 
+-- name: SearchProducts :many
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+WHERE name ILIKE '%' || sqlc.arg(search_term) || '%'
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(page_limit)
+OFFSET sqlc.arg(page_offset);
+
 -- name: ListProductsPriceAsc :many
 SELECT
     p.id,
