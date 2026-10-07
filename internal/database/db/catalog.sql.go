@@ -11,6 +11,112 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createProduct = `-- name: CreateProduct :one
+INSERT INTO products (
+    name,
+    description
+)
+VALUES ($1, $2)
+RETURNING
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+`
+
+type CreateProductParams struct {
+	Name        string
+	Description pgtype.Text
+}
+
+func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error) {
+	row := q.db.QueryRow(ctx, createProduct, arg.Name, arg.Description)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createProductVariant = `-- name: CreateProductVariant :one
+INSERT INTO product_variants (
+    product_id,
+    sku,
+    size,
+    color,
+    price
+)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING
+    id,
+    product_id,
+    sku,
+    size,
+    color,
+    price,
+    created_at,
+    updated_at
+`
+
+type CreateProductVariantParams struct {
+	ProductID pgtype.UUID
+	Sku       string
+	Size      pgtype.Text
+	Color     pgtype.Text
+	Price     int64
+}
+
+func (q *Queries) CreateProductVariant(ctx context.Context, arg CreateProductVariantParams) (ProductVariant, error) {
+	row := q.db.QueryRow(ctx, createProductVariant,
+		arg.ProductID,
+		arg.Sku,
+		arg.Size,
+		arg.Color,
+		arg.Price,
+	)
+	var i ProductVariant
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Sku,
+		&i.Size,
+		&i.Color,
+		&i.Price,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getProduct = `-- name: GetProduct :one
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+WHERE id = $1
+`
+
+func (q *Queries) GetProduct(ctx context.Context, id pgtype.UUID) (Product, error) {
+	row := q.db.QueryRow(ctx, getProduct, id)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getProductVariant = `-- name: GetProductVariant :one
 SELECT
     id,
@@ -39,4 +145,48 @@ func (q *Queries) GetProductVariant(ctx context.Context, id pgtype.UUID) (Produc
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listProducts = `-- name: ListProducts :many
+SELECT
+    id,
+    name,
+    description,
+    created_at,
+    updated_at
+FROM products
+ORDER BY created_at DESC
+LIMIT $1
+OFFSET $2
+`
+
+type ListProductsParams struct {
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listProducts, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

@@ -19,6 +19,7 @@ import (
 	apphttp "github.com/san-sp/Golang_E-Commerce_Project/internal/http"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/product"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
 
@@ -60,6 +61,8 @@ func main() {
 		paymentProvider,
 	)
 
+	productService := product.NewService(pool, queries)
+
 	reservationService := reservation.NewService(
 		pool,
 		queries,
@@ -90,6 +93,7 @@ func main() {
 		cartService,
 		checkoutService,
 		orderService,
+		productService,
 	)
 
 	router := gin.New()
@@ -123,6 +127,10 @@ func main() {
 	// Order
 	api.GET("/orders/:id", handler.GetOrder)
 	api.POST("/orders/:id/cancel", handler.CancelOrder)
+
+	// Product
+	api.GET("/products", handler.ListProducts)
+	api.GET("/products/:id", handler.GetProduct)
 
 	server := &http.Server{
 		Addr:              ":8080",
