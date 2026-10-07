@@ -10,6 +10,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
+	categorypkg "github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
@@ -27,6 +29,7 @@ type Handler struct {
 	checkoutService    *checkout.Service
 	orderService       *order.Service
 	productService     *product.Service
+	categoryService    *category.Service
 }
 
 func NewHandler(
@@ -37,6 +40,7 @@ func NewHandler(
 	checkoutService *checkout.Service,
 	orderService *order.Service,
 	productService *product.Service,
+	categoryService *category.Service,
 ) *Handler {
 	return &Handler{
 		paymentService:     paymentService,
@@ -46,6 +50,7 @@ func NewHandler(
 		checkoutService:    checkoutService,
 		orderService:       orderService,
 		productService:     productService,
+		categoryService:    categoryService,
 	}
 }
 
@@ -216,6 +221,215 @@ func (h *Handler) ListProductVariants(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, variants)
+}
+
+func (h *Handler) CreateCategory(c *gin.Context) {
+	var request struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	createdCategory, err := h.categoryService.CreateCategory(
+		c.Request.Context(),
+		request.Name,
+		request.Slug,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, categorypkg.ErrCategoryNameEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, categorypkg.ErrCategorySlugEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusCreated, createdCategory)
+}
+
+func (h *Handler) ListCategories(c *gin.Context) {
+	categories, err := h.categoryService.ListCategories(
+		c.Request.Context(),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, categories)
+}
+
+func (h *Handler) GetCategory(c *gin.Context) {
+	categoryID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid category ID",
+		})
+		return
+	}
+
+	category, err := h.categoryService.GetCategory(
+		c.Request.Context(),
+		categoryID,
+	)
+	if err != nil {
+		if errors.Is(err, categorypkg.ErrCategoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "category not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, category)
+}
+
+func (h *Handler) GetCategoryBySlug(c *gin.Context) {
+	category, err := h.categoryService.GetCategoryBySlug(
+		c.Request.Context(),
+		c.Param("slug"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, categorypkg.ErrCategorySlugEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, categorypkg.ErrCategoryNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "category not found",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusOK, category)
+}
+
+// AddProductToCategory assigns a product to a category.
+func (h *Handler) AddProductToCategory(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		return
+	}
+
+	categoryID, err := uuid.Parse(c.Param("categoryID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category ID"})
+		return
+	}
+
+	err = h.categoryService.AddProductToCategory(
+		c.Request.Context(),
+		productID,
+		categoryID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to add product to category"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// RemoveProductFromCategory removes a product from a category.
+func (h *Handler) RemoveProductFromCategory(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		return
+	}
+
+	categoryID, err := uuid.Parse(c.Param("categoryID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category ID"})
+		return
+	}
+
+	err = h.categoryService.RemoveProductFromCategory(
+		c.Request.Context(),
+		productID,
+		categoryID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove product from category"})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+// ListProductCategories returns all categories assigned to a product.
+func (h *Handler) ListProductCategories(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
+		return
+	}
+
+	categories, err := h.categoryService.ListProductCategories(
+		c.Request.Context(),
+		productID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list product categories"})
+		return
+	}
+
+	c.JSON(http.StatusOK, categories)
+}
+
+// ListCategoryProducts returns all products assigned to a category.
+func (h *Handler) ListCategoryProducts(c *gin.Context) {
+	categoryID, err := uuid.Parse(c.Param("categoryID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid category ID"})
+		return
+	}
+
+	products, err := h.categoryService.ListCategoryProducts(
+		c.Request.Context(),
+		categoryID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list category products"})
+		return
+	}
+
+	c.JSON(http.StatusOK, products)
 }
 
 // Cart

@@ -24,6 +24,14 @@ type CartItem struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type Category struct {
+	ID        pgtype.UUID
+	Name      string
+	Slug      string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type ConsumerEvent struct {
 	ID           pgtype.UUID
 	ConsumerName string
@@ -103,6 +111,11 @@ type Product struct {
 	Description pgtype.Text
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+}
+
+type ProductCategory struct {
+	ProductID  pgtype.UUID
+	CategoryID pgtype.UUID
 }
 
 type ProductVariant struct {

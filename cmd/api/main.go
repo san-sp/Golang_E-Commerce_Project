@@ -13,6 +13,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
@@ -63,6 +64,8 @@ func main() {
 
 	productService := product.NewService(pool, queries)
 
+	categoryService := category.NewService(pool, queries)
+
 	reservationService := reservation.NewService(
 		pool,
 		queries,
@@ -94,6 +97,7 @@ func main() {
 		checkoutService,
 		orderService,
 		productService,
+		categoryService,
 	)
 
 	router := gin.New()
@@ -132,6 +136,17 @@ func main() {
 	api.GET("/products", handler.ListProducts)
 	api.GET("/products/:id", handler.GetProduct)
 	api.GET("/products/:id/variants", handler.ListProductVariants)
+
+	api.POST("/categories", handler.CreateCategory)
+	api.GET("/categories", handler.ListCategories)
+	api.GET("/categories/:id", handler.GetCategory)
+	api.GET("/categories/slug/:slug", handler.GetCategoryBySlug)
+
+	api.POST("/products/:productID/categories/:categoryID", handler.AddProductToCategory)
+	api.DELETE("/products/:productID/categories/:categoryID", handler.RemoveProductFromCategory)
+
+	api.GET("/products/:productID/categories", handler.ListProductCategories)
+	api.GET("/categories/:categoryID/products", handler.ListCategoryProducts)
 
 	server := &http.Server{
 		Addr:              ":8080",

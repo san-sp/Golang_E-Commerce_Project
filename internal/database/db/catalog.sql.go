@@ -11,6 +11,56 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addProductToCategory = `-- name: AddProductToCategory :exec
+INSERT INTO product_categories (
+    product_id,
+    category_id
+)
+VALUES ($1, $2)
+`
+
+type AddProductToCategoryParams struct {
+	ProductID  pgtype.UUID
+	CategoryID pgtype.UUID
+}
+
+func (q *Queries) AddProductToCategory(ctx context.Context, arg AddProductToCategoryParams) error {
+	_, err := q.db.Exec(ctx, addProductToCategory, arg.ProductID, arg.CategoryID)
+	return err
+}
+
+const createCategory = `-- name: CreateCategory :one
+INSERT INTO categories (
+    name,
+    slug
+)
+VALUES ($1, $2)
+RETURNING
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+`
+
+type CreateCategoryParams struct {
+	Name string
+	Slug string
+}
+
+func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, createCategory, arg.Name, arg.Slug)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createProduct = `-- name: CreateProduct :one
 INSERT INTO products (
     name,
@@ -93,6 +143,54 @@ func (q *Queries) CreateProductVariant(ctx context.Context, arg CreateProductVar
 	return i, err
 }
 
+const getCategory = `-- name: GetCategory :one
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+WHERE id = $1
+`
+
+func (q *Queries) GetCategory(ctx context.Context, id pgtype.UUID) (Category, error) {
+	row := q.db.QueryRow(ctx, getCategory, id)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCategoryBySlug = `-- name: GetCategoryBySlug :one
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+WHERE slug = $1
+`
+
+func (q *Queries) GetCategoryBySlug(ctx context.Context, slug string) (Category, error) {
+	row := q.db.QueryRow(ctx, getCategoryBySlug, slug)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getProduct = `-- name: GetProduct :one
 SELECT
     id,
@@ -145,6 +243,123 @@ func (q *Queries) GetProductVariant(ctx context.Context, id pgtype.UUID) (Produc
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listCategories = `-- name: ListCategories :many
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListCategories(ctx context.Context) ([]Category, error) {
+	rows, err := q.db.Query(ctx, listCategories)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Category
+	for rows.Next() {
+		var i Category
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCategoryProducts = `-- name: ListCategoryProducts :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_categories pc
+    ON pc.product_id = p.id
+WHERE pc.category_id = $1
+ORDER BY p.created_at DESC, p.id DESC
+`
+
+func (q *Queries) ListCategoryProducts(ctx context.Context, categoryID pgtype.UUID) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listCategoryProducts, categoryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listProductCategories = `-- name: ListProductCategories :many
+SELECT
+    c.id,
+    c.name,
+    c.slug,
+    c.created_at,
+    c.updated_at
+FROM categories c
+JOIN product_categories pc
+    ON pc.category_id = c.id
+WHERE pc.product_id = $1
+ORDER BY c.created_at DESC, c.id DESC
+`
+
+func (q *Queries) ListProductCategories(ctx context.Context, productID pgtype.UUID) ([]Category, error) {
+	rows, err := q.db.Query(ctx, listProductCategories, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Category
+	for rows.Next() {
+		var i Category
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listProductVariants = `-- name: ListProductVariants :many
@@ -435,6 +650,22 @@ func (q *Queries) ListProductsPriceDesc(ctx context.Context, arg ListProductsPri
 		return nil, err
 	}
 	return items, nil
+}
+
+const removeProductFromCategory = `-- name: RemoveProductFromCategory :exec
+DELETE FROM product_categories
+WHERE product_id = $1
+  AND category_id = $2
+`
+
+type RemoveProductFromCategoryParams struct {
+	ProductID  pgtype.UUID
+	CategoryID pgtype.UUID
+}
+
+func (q *Queries) RemoveProductFromCategory(ctx context.Context, arg RemoveProductFromCategoryParams) error {
+	_, err := q.db.Exec(ctx, removeProductFromCategory, arg.ProductID, arg.CategoryID)
+	return err
 }
 
 const searchProducts = `-- name: SearchProducts :many

@@ -165,3 +165,84 @@ SELECT
     updated_at
 FROM product_variants
 WHERE id = $1;
+
+-- name: CreateCategory :one
+INSERT INTO categories (
+    name,
+    slug
+)
+VALUES ($1, $2)
+RETURNING
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at;
+
+-- name: GetCategory :one
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+WHERE id = $1;
+
+-- name: GetCategoryBySlug :one
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+WHERE slug = $1;
+
+-- name: ListCategories :many
+SELECT
+    id,
+    name,
+    slug,
+    created_at,
+    updated_at
+FROM categories
+ORDER BY created_at DESC, id DESC;
+
+-- name: AddProductToCategory :exec
+INSERT INTO product_categories (
+    product_id,
+    category_id
+)
+VALUES ($1, $2);
+
+-- name: RemoveProductFromCategory :exec
+DELETE FROM product_categories
+WHERE product_id = $1
+  AND category_id = $2;
+
+-- name: ListProductCategories :many
+SELECT
+    c.id,
+    c.name,
+    c.slug,
+    c.created_at,
+    c.updated_at
+FROM categories c
+JOIN product_categories pc
+    ON pc.category_id = c.id
+WHERE pc.product_id = $1
+ORDER BY c.created_at DESC, c.id DESC;
+
+-- name: ListCategoryProducts :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at
+FROM products p
+JOIN product_categories pc
+    ON pc.product_id = p.id
+WHERE pc.category_id = $1
+ORDER BY p.created_at DESC, p.id DESC;

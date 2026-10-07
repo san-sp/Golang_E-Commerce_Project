@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
@@ -91,6 +92,7 @@ func setupCheckoutHandler(t *testing.T) (
 		checkoutService,
 		orderService,
 		nil,
+		nil,
 	)
 
 	return handler, queries, provider, pool
@@ -157,6 +159,7 @@ func TestGetProduct(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -187,6 +190,7 @@ func TestGetProduct(t *testing.T) {
 
 func TestGetProductInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -251,6 +255,7 @@ func TestGetProductNotFound(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -338,6 +343,7 @@ func TestListProducts(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -370,8 +376,256 @@ func TestListProducts(t *testing.T) {
 	}
 }
 
+func TestCategoryProductRelationshipHTTP(t *testing.T) {
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+	defer pool.Close()
+
+	queries := db.New(pool)
+
+	categoryService := category.NewService(pool, queries)
+	productService := product.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		productService,
+		categoryService,
+	)
+
+	router := gin.New()
+
+	router.POST(
+		"/products/:productID/categories/:categoryID",
+		handler.AddProductToCategory,
+	)
+
+	router.DELETE(
+		"/products/:productID/categories/:categoryID",
+		handler.RemoveProductFromCategory,
+	)
+
+	router.GET(
+		"/products/:productID/categories",
+		handler.ListProductCategories,
+	)
+
+	router.GET(
+		"/categories/:categoryID/products",
+		handler.ListCategoryProducts,
+	)
+
+	// ctx := context.Background()
+
+	productRow, err := queries.CreateProduct(ctx, db.CreateProductParams{
+		Name:        "Category HTTP Test Product",
+		Description: pgtype.Text{String: "HTTP relationship test", Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	categoryRow, err := queries.CreateCategory(ctx, db.CreateCategoryParams{
+		Name: "Category HTTP Test",
+		Slug: "category-http-test-" + uuid.NewString(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			"DELETE FROM products WHERE id = $1",
+			productRow.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			"DELETE FROM categories WHERE id = $1",
+			categoryRow.ID,
+		)
+
+		pool.Close()
+	})
+
+	// --------------------------------------------------
+	// ADD PRODUCT TO CATEGORY
+	// --------------------------------------------------
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/products/"+productRow.ID.String()+"/categories/"+categoryRow.ID.String(),
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusNoContent,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	// --------------------------------------------------
+	// LIST PRODUCT CATEGORIES
+	// --------------------------------------------------
+
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/products/"+productRow.ID.String()+"/categories",
+		nil,
+	)
+
+	rec = httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var categories []db.Category
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &categories); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(categories) != 1 {
+		t.Fatalf("expected 1 category, got %d", len(categories))
+	}
+
+	if categories[0].ID != categoryRow.ID {
+		t.Fatalf("expected category %v, got %v", categoryRow.ID, categories[0].ID)
+	}
+
+	// --------------------------------------------------
+	// LIST CATEGORY PRODUCTS
+	// --------------------------------------------------
+
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/categories/"+categoryRow.ID.String()+"/products",
+		nil,
+	)
+
+	rec = httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var products []db.Product
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &products); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(products) != 1 {
+		t.Fatalf("expected 1 product, got %d", len(products))
+	}
+
+	if products[0].ID != productRow.ID {
+		t.Fatalf("expected product %v, got %v", productRow.ID, products[0].ID)
+	}
+
+	// --------------------------------------------------
+	// REMOVE PRODUCT FROM CATEGORY
+	// --------------------------------------------------
+
+	req = httptest.NewRequest(
+		http.MethodDelete,
+		"/products/"+productRow.ID.String()+"/categories/"+categoryRow.ID.String(),
+		nil,
+	)
+
+	rec = httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusNoContent,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	// --------------------------------------------------
+	// VERIFY RELATIONSHIP WAS REMOVED
+	// --------------------------------------------------
+
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/products/"+productRow.ID.String()+"/categories",
+		nil,
+	)
+
+	rec = httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	var remainingCategories []db.Category
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &remainingCategories); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(remainingCategories) != 0 {
+		t.Fatalf(
+			"expected 0 categories after removal, got %d",
+			len(remainingCategories),
+		)
+	}
+}
+
 func TestListProductsInvalidPage(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -408,6 +662,7 @@ func TestListProductsInvalidPage(t *testing.T) {
 
 func TestListProductsInvalidLimit(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -516,6 +771,7 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -671,6 +927,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -826,6 +1083,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -950,6 +1208,7 @@ func TestListProductsSearch(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1055,6 +1314,7 @@ func TestListProductsSearchIsCaseInsensitive(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1113,6 +1373,7 @@ func TestListProductsSearchRejectsWhitespace(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1245,6 +1506,7 @@ func TestListProductsMinPrice(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1311,6 +1573,7 @@ func TestListProductsMinPriceInvalidValue(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1369,6 +1632,7 @@ func TestListProductsMinPriceNegative(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1408,6 +1672,7 @@ func TestListProductsSearchAndMinPriceCannotBeCombined(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1447,6 +1712,7 @@ func TestListProductsInvalidSort(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1541,6 +1807,7 @@ func TestListProductVariants(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -1575,6 +1842,7 @@ func TestListProductVariants(t *testing.T) {
 
 func TestListProductVariantsInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -1657,6 +1925,7 @@ func TestListProductVariantsEmpty(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 	)
 
 	router := gin.New()
@@ -2250,6 +2519,7 @@ func TestCreateReservationHandler(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -2377,6 +2647,7 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		nil,
 		nil,
 		reservationService,
+		nil,
 		nil,
 		nil,
 		nil,
