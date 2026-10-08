@@ -29,6 +29,42 @@ func (q *Queries) AddProductToCategory(ctx context.Context, arg AddProductToCate
 	return err
 }
 
+const clearProductBrand = `-- name: ClearProductBrand :exec
+UPDATE products
+SET brand_id = NULL,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+func (q *Queries) ClearProductBrand(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, clearProductBrand, id)
+	return err
+}
+
+const createBrand = `-- name: CreateBrand :one
+INSERT INTO brands (name, slug)
+VALUES ($1, $2)
+RETURNING id, name, slug, created_at, updated_at
+`
+
+type CreateBrandParams struct {
+	Name string
+	Slug string
+}
+
+func (q *Queries) CreateBrand(ctx context.Context, arg CreateBrandParams) (Brand, error) {
+	row := q.db.QueryRow(ctx, createBrand, arg.Name, arg.Slug)
+	var i Brand
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createCategory = `-- name: CreateCategory :one
 INSERT INTO categories (
     name,
@@ -80,9 +116,17 @@ type CreateProductParams struct {
 	Description pgtype.Text
 }
 
-func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error) {
+type CreateProductRow struct {
+	ID          pgtype.UUID
+	Name        string
+	Description pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (CreateProductRow, error) {
 	row := q.db.QueryRow(ctx, createProduct, arg.Name, arg.Description)
-	var i Product
+	var i CreateProductRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -143,6 +187,44 @@ func (q *Queries) CreateProductVariant(ctx context.Context, arg CreateProductVar
 	return i, err
 }
 
+const getBrand = `-- name: GetBrand :one
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+WHERE id = $1
+`
+
+func (q *Queries) GetBrand(ctx context.Context, id pgtype.UUID) (Brand, error) {
+	row := q.db.QueryRow(ctx, getBrand, id)
+	var i Brand
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getBrandBySlug = `-- name: GetBrandBySlug :one
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+WHERE slug = $1
+`
+
+func (q *Queries) GetBrandBySlug(ctx context.Context, slug string) (Brand, error) {
+	row := q.db.QueryRow(ctx, getBrandBySlug, slug)
+	var i Brand
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getCategory = `-- name: GetCategory :one
 SELECT
     id,
@@ -197,7 +279,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 WHERE id = $1
 `
@@ -209,6 +292,27 @@ func (q *Queries) GetProduct(ctx context.Context, id pgtype.UUID) (Product, erro
 		&i.ID,
 		&i.Name,
 		&i.Description,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BrandID,
+	)
+	return i, err
+}
+
+const getProductBrand = `-- name: GetProductBrand :one
+SELECT b.id, b.name, b.slug, b.created_at, b.updated_at
+FROM brands b
+JOIN products p ON p.brand_id = b.id
+WHERE p.id = $1
+`
+
+func (q *Queries) GetProductBrand(ctx context.Context, id pgtype.UUID) (Brand, error) {
+	row := q.db.QueryRow(ctx, getProductBrand, id)
+	var i Brand
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -243,6 +347,78 @@ func (q *Queries) GetProductVariant(ctx context.Context, id pgtype.UUID) (Produc
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const listBrandProducts = `-- name: ListBrandProducts :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at,
+    p.brand_id
+FROM products p
+WHERE p.brand_id = $1
+ORDER BY p.created_at DESC, p.id DESC
+`
+
+func (q *Queries) ListBrandProducts(ctx context.Context, brandID pgtype.UUID) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listBrandProducts, brandID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Product
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BrandID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBrands = `-- name: ListBrands :many
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListBrands(ctx context.Context) ([]Brand, error) {
+	rows, err := q.db.Query(ctx, listBrands)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Brand
+	for rows.Next() {
+		var i Brand
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listCategories = `-- name: ListCategories :many
@@ -288,7 +464,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_categories pc
     ON pc.product_id = p.id
@@ -311,6 +488,7 @@ func (q *Queries) ListCategoryProducts(ctx context.Context, categoryID pgtype.UU
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -412,7 +590,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 ORDER BY created_at DESC, id DESC
 LIMIT $1
@@ -439,6 +618,7 @@ func (q *Queries) ListProducts(ctx context.Context, arg ListProductsParams) ([]P
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -456,7 +636,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 ORDER BY created_at ASC, id ASC
 LIMIT $1
@@ -483,6 +664,7 @@ func (q *Queries) ListProductsAsc(ctx context.Context, arg ListProductsAscParams
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -500,7 +682,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -508,6 +691,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 HAVING MIN(pv.price) >= $1
@@ -537,6 +721,7 @@ func (q *Queries) ListProductsMinPrice(ctx context.Context, arg ListProductsMinP
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -554,7 +739,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -562,6 +748,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 ORDER BY MIN(pv.price) ASC, p.id ASC
@@ -589,6 +776,7 @@ func (q *Queries) ListProductsPriceAsc(ctx context.Context, arg ListProductsPric
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -606,7 +794,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -614,6 +803,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 ORDER BY MIN(pv.price) DESC, p.id DESC
@@ -641,6 +831,7 @@ func (q *Queries) ListProductsPriceDesc(ctx context.Context, arg ListProductsPri
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -674,7 +865,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 WHERE name ILIKE '%' || $1 || '%'
 ORDER BY created_at DESC, id DESC
@@ -703,6 +895,7 @@ func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) 
 			&i.Description,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BrandID,
 		); err != nil {
 			return nil, err
 		}
@@ -712,4 +905,21 @@ func (q *Queries) SearchProducts(ctx context.Context, arg SearchProductsParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateProductBrand = `-- name: UpdateProductBrand :exec
+UPDATE products
+SET brand_id = $2,
+    updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateProductBrandParams struct {
+	ID      pgtype.UUID
+	BrandID pgtype.UUID
+}
+
+func (q *Queries) UpdateProductBrand(ctx context.Context, arg UpdateProductBrandParams) error {
+	_, err := q.db.Exec(ctx, updateProductBrand, arg.ID, arg.BrandID)
+	return err
 }

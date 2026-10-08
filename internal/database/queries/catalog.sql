@@ -17,7 +17,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 ORDER BY created_at DESC, id DESC
 LIMIT $1
@@ -29,7 +30,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 ORDER BY created_at ASC, id ASC
 LIMIT $1
@@ -41,7 +43,8 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 WHERE name ILIKE '%' || sqlc.arg(search_term) || '%'
 ORDER BY created_at DESC, id DESC
@@ -54,7 +57,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -62,6 +66,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 HAVING MIN(pv.price) >= sqlc.arg(min_price)
@@ -75,7 +80,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -83,6 +89,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 ORDER BY MIN(pv.price) ASC, p.id ASC
@@ -95,7 +102,8 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_variants pv
     ON pv.product_id = p.id
@@ -103,6 +111,7 @@ GROUP BY
     p.id,
     p.name,
     p.description,
+    p.brand_id,
     p.created_at,
     p.updated_at
 ORDER BY MIN(pv.price) DESC, p.id DESC
@@ -115,10 +124,10 @@ SELECT
     name,
     description,
     created_at,
-    updated_at
+    updated_at,
+    brand_id
 FROM products
 WHERE id = $1;
-
 
 -- name: CreateProductVariant :one
 INSERT INTO product_variants (
@@ -240,9 +249,60 @@ SELECT
     p.name,
     p.description,
     p.created_at,
-    p.updated_at
+    p.updated_at,
+    p.brand_id
 FROM products p
 JOIN product_categories pc
     ON pc.product_id = p.id
 WHERE pc.category_id = $1
+ORDER BY p.created_at DESC, p.id DESC;
+
+-- name: CreateBrand :one
+INSERT INTO brands (name, slug)
+VALUES ($1, $2)
+RETURNING id, name, slug, created_at, updated_at;
+
+-- name: GetBrand :one
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+WHERE id = $1;
+
+-- name: GetBrandBySlug :one
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+WHERE slug = $1;
+
+-- name: ListBrands :many
+SELECT id, name, slug, created_at, updated_at
+FROM brands
+ORDER BY created_at DESC, id DESC;
+
+-- name: UpdateProductBrand :exec
+UPDATE products
+SET brand_id = $2,
+    updated_at = NOW()
+WHERE id = $1;
+
+-- name: ClearProductBrand :exec
+UPDATE products
+SET brand_id = NULL,
+    updated_at = NOW()
+WHERE id = $1;
+
+-- name: GetProductBrand :one
+SELECT b.id, b.name, b.slug, b.created_at, b.updated_at
+FROM brands b
+JOIN products p ON p.brand_id = b.id
+WHERE p.id = $1;
+
+-- name: ListBrandProducts :many
+SELECT
+    p.id,
+    p.name,
+    p.description,
+    p.created_at,
+    p.updated_at,
+    p.brand_id
+FROM products p
+WHERE p.brand_id = $1
 ORDER BY p.created_at DESC, p.id DESC;

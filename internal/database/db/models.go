@@ -8,6 +8,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type Brand struct {
+	ID        pgtype.UUID
+	Name      string
+	Slug      string
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
 type Cart struct {
 	ID        pgtype.UUID
 	Status    string
@@ -111,6 +119,7 @@ type Product struct {
 	Description pgtype.Text
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	BrandID     pgtype.UUID
 }
 
 type ProductCategory struct {
