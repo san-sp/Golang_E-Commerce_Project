@@ -16,6 +16,7 @@ import (
 	categorypkg "github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/inventory"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/product"
@@ -33,6 +34,7 @@ type Handler struct {
 	productService     *product.Service
 	categoryService    *category.Service
 	brandService       *brandpkg.Service
+	inventoryService   *inventory.Service
 }
 
 func NewHandler(
@@ -45,6 +47,7 @@ func NewHandler(
 	productService *product.Service,
 	categoryService *category.Service,
 	brandService *brandpkg.Service,
+	inventoryService *inventory.Service,
 ) *Handler {
 	return &Handler{
 		paymentService:     paymentService,
@@ -56,6 +59,7 @@ func NewHandler(
 		productService:     productService,
 		categoryService:    categoryService,
 		brandService:       brandService,
+		inventoryService:   inventoryService,
 	}
 }
 
@@ -1680,4 +1684,35 @@ func (h *Handler) ListBrandProducts(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, products)
+}
+
+// Inventory
+func (h *Handler) GetInventory(c *gin.Context) {
+	variantID, err := uuid.Parse(c.Param("variantID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid variant ID",
+		})
+		return
+	}
+
+	result, err := h.inventoryService.GetInventory(
+		c.Request.Context(),
+		variantID,
+	)
+	if err != nil {
+		if errors.Is(err, inventory.ErrInventoryNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "inventory not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
 }

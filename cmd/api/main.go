@@ -19,6 +19,7 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 	apphttp "github.com/san-sp/Golang_E-Commerce_Project/internal/http"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/inventory"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/product"
@@ -92,6 +93,11 @@ func main() {
 		paymentService,
 	)
 
+	inventoryService := inventory.NewService(
+		pool,
+		queries,
+	)
+
 	handler := apphttp.NewHandler(
 		paymentService,
 		refundService,
@@ -102,6 +108,7 @@ func main() {
 		productService,
 		categoryService,
 		brandService,
+		inventoryService,
 	)
 
 	router := gin.New()
@@ -163,6 +170,9 @@ func main() {
 	api.GET("/products/:productID/brand", handler.GetProductBrand)
 
 	api.GET("/brands/:brandID/products", handler.ListBrandProducts)
+
+	// Inventory
+	api.GET("/inventory/:variantID", handler.GetInventory)
 
 	server := &http.Server{
 		Addr:              ":8080",

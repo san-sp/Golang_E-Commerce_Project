@@ -95,6 +95,7 @@ func setupCheckoutHandler(t *testing.T) (
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	return handler, queries, provider, pool
@@ -163,6 +164,7 @@ func TestGetProduct(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -193,6 +195,7 @@ func TestGetProduct(t *testing.T) {
 
 func TestGetProductInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -259,6 +262,7 @@ func TestGetProductNotFound(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 		nil,
 	)
@@ -350,6 +354,7 @@ func TestListProducts(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -414,6 +419,7 @@ func TestCategoryProductRelationshipHTTP(t *testing.T) {
 		nil,
 		productService,
 		categoryService,
+		nil,
 		nil,
 	)
 
@@ -679,6 +685,7 @@ func TestBrandHTTP(t *testing.T) {
 		nil,
 		nil,
 		brandService,
+		nil,
 	)
 
 	router := gin.New()
@@ -923,6 +930,7 @@ func TestListProductsInvalidPage(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -952,6 +960,7 @@ func TestListProductsInvalidPage(t *testing.T) {
 
 func TestListProductsInvalidLimit(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -1062,6 +1071,7 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 		nil,
 	)
@@ -1221,6 +1231,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1378,6 +1389,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1504,6 +1516,7 @@ func TestListProductsSearch(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1611,6 +1624,7 @@ func TestListProductsSearchIsCaseInsensitive(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1669,6 +1683,7 @@ func TestListProductsSearchRejectsWhitespace(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 		nil,
 	)
@@ -1805,6 +1820,7 @@ func TestListProductsMinPrice(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1873,6 +1889,7 @@ func TestListProductsMinPriceInvalidValue(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1933,6 +1950,7 @@ func TestListProductsMinPriceNegative(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1974,6 +1992,7 @@ func TestListProductsSearchAndMinPriceCannotBeCombined(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -2013,6 +2032,7 @@ func TestListProductsInvalidSort(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 		nil,
 	)
@@ -2111,6 +2131,7 @@ func TestListProductVariants(t *testing.T) {
 		productService,
 		nil,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -2145,6 +2166,7 @@ func TestListProductVariants(t *testing.T) {
 
 func TestListProductVariantsInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -2229,6 +2251,7 @@ func TestListProductVariantsEmpty(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 		nil,
 	)
@@ -2826,6 +2849,7 @@ func TestCreateReservationHandler(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -2953,6 +2977,7 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		nil,
 		nil,
 		reservationService,
+		nil,
 		nil,
 		nil,
 		nil,
