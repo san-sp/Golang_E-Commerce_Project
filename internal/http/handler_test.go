@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/brand"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
@@ -93,6 +94,7 @@ func setupCheckoutHandler(t *testing.T) (
 		orderService,
 		nil,
 		nil,
+		nil,
 	)
 
 	return handler, queries, provider, pool
@@ -160,6 +162,7 @@ func TestGetProduct(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -190,6 +193,7 @@ func TestGetProduct(t *testing.T) {
 
 func TestGetProductInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -255,6 +259,7 @@ func TestGetProductNotFound(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 	)
 
@@ -344,6 +349,7 @@ func TestListProducts(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -408,6 +414,7 @@ func TestCategoryProductRelationshipHTTP(t *testing.T) {
 		nil,
 		productService,
 		categoryService,
+		nil,
 	)
 
 	router := gin.New()
@@ -623,8 +630,291 @@ func TestCategoryProductRelationshipHTTP(t *testing.T) {
 	}
 }
 
+func setupBrandHTTPTest(t *testing.T) (
+	context.Context,
+	*pgxpool.Pool,
+	*db.Queries,
+	func(),
+) {
+	t.Helper()
+
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	queries := db.New(pool)
+
+	cleanup := func() {
+		pool.Close()
+	}
+
+	return ctx, pool, queries, cleanup
+}
+
+func TestBrandHTTP(t *testing.T) {
+	ctx, pool, queries, cleanup := setupBrandHTTPTest(t)
+	defer cleanup()
+
+	brandService := brand.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		brandService,
+	)
+
+	router := gin.New()
+
+	router.POST("/api/v1/brands", handler.CreateBrand)
+	router.GET("/api/v1/brands", handler.ListBrands)
+	router.GET("/api/v1/brands/id/:id", handler.GetBrand)
+	router.GET("/api/v1/brands/slug/:slug", handler.GetBrandBySlug)
+
+	router.POST(
+		"/api/v1/products/:productID/brands/:brandID",
+		handler.AssignProductBrand,
+	)
+
+	router.DELETE(
+		"/api/v1/products/:productID/brand",
+		handler.ClearProductBrand,
+	)
+
+	router.GET(
+		"/api/v1/products/:productID/brand",
+		handler.GetProductBrand,
+	)
+
+	router.GET(
+		"/api/v1/brands/:brandID/products",
+		handler.ListBrandProducts,
+	)
+
+	// Create brand.
+	testID := uuid.NewString()
+
+	requestBody := `{
+		"name": "Nike ` + testID + `",
+		"slug": "nike-` + testID + `"
+	}`
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/brands",
+		bytes.NewBufferString(requestBody),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	recorder := httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status 201, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var created db.Brand
+
+	if err := json.Unmarshal(
+		recorder.Body.Bytes(),
+		&created,
+	); err != nil {
+		t.Fatalf("decode created brand: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM brands WHERE id = $1`,
+			created.ID,
+		)
+	})
+
+	brandID := uuid.UUID(created.ID.Bytes).String()
+
+	// Get brand.
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/brands/id/"+brandID,
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// Get brand by slug.
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/brands/slug/nike-"+testID,
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// List brands.
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/brands",
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// Create product for relationship tests.
+	productID := uuid.New()
+
+	_, err := pool.Exec(
+		ctx,
+		`INSERT INTO products (id, name)
+		 VALUES ($1, $2)`,
+		productID,
+		"Brand HTTP Product "+testID,
+	)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productID,
+		)
+	})
+
+	productIDString := productID.String()
+
+	// Assign brand.
+	req = httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/products/"+productIDString+"/brands/"+brandID,
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status 204, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// Get product brand.
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/products/"+productIDString+"/brand",
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// List products belonging to brand.
+	req = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/brands/"+brandID+"/products",
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status 200, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	// Clear brand.
+	req = httptest.NewRequest(
+		http.MethodDelete,
+		"/api/v1/products/"+productIDString+"/brand",
+		nil,
+	)
+
+	recorder = httptest.NewRecorder()
+
+	router.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status 204, got %d: %s",
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
 func TestListProductsInvalidPage(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -662,6 +952,7 @@ func TestListProductsInvalidPage(t *testing.T) {
 
 func TestListProductsInvalidLimit(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -771,6 +1062,7 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 	)
 
@@ -928,6 +1220,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1084,6 +1377,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1209,6 +1503,7 @@ func TestListProductsSearch(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1315,6 +1610,7 @@ func TestListProductsSearchIsCaseInsensitive(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1373,6 +1669,7 @@ func TestListProductsSearchRejectsWhitespace(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 	)
 
@@ -1507,6 +1804,7 @@ func TestListProductsMinPrice(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1574,6 +1872,7 @@ func TestListProductsMinPriceInvalidValue(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1633,6 +1932,7 @@ func TestListProductsMinPriceNegative(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1673,6 +1973,7 @@ func TestListProductsSearchAndMinPriceCannotBeCombined(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1712,6 +2013,7 @@ func TestListProductsInvalidSort(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 	)
 
@@ -1808,6 +2110,7 @@ func TestListProductVariants(t *testing.T) {
 		nil,
 		productService,
 		nil,
+		nil,
 	)
 
 	router := gin.New()
@@ -1842,6 +2145,7 @@ func TestListProductVariants(t *testing.T) {
 
 func TestListProductVariantsInvalidID(t *testing.T) {
 	handler := NewHandler(
+		nil,
 		nil,
 		nil,
 		nil,
@@ -1925,6 +2229,7 @@ func TestListProductVariantsEmpty(t *testing.T) {
 		nil,
 		nil,
 		productService,
+		nil,
 		nil,
 	)
 
@@ -2520,6 +2825,7 @@ func TestCreateReservationHandler(t *testing.T) {
 		nil,
 		nil,
 		nil,
+		nil,
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -2647,6 +2953,7 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		nil,
 		nil,
 		reservationService,
+		nil,
 		nil,
 		nil,
 		nil,

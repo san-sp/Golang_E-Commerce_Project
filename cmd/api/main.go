@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/brand"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
@@ -66,6 +67,8 @@ func main() {
 
 	categoryService := category.NewService(pool, queries)
 
+	brandService := brand.NewService(pool, queries)
+
 	reservationService := reservation.NewService(
 		pool,
 		queries,
@@ -98,6 +101,7 @@ func main() {
 		orderService,
 		productService,
 		categoryService,
+		brandService,
 	)
 
 	router := gin.New()
@@ -147,6 +151,18 @@ func main() {
 
 	api.GET("/products/:productID/categories", handler.ListProductCategories)
 	api.GET("/categories/:categoryID/products", handler.ListCategoryProducts)
+
+	// Brand
+	api.POST("/brands", handler.CreateBrand)
+	api.GET("/brands", handler.ListBrands)
+	api.GET("/brands/id/:id", handler.GetBrand)
+	api.GET("/brands/slug/:slug", handler.GetBrandBySlug)
+
+	api.POST("/products/:productID/brands/:brandID", handler.AssignProductBrand)
+	api.DELETE("/products/:productID/brand", handler.ClearProductBrand)
+	api.GET("/products/:productID/brand", handler.GetProductBrand)
+
+	api.GET("/brands/:brandID/products", handler.ListBrandProducts)
 
 	server := &http.Server{
 		Addr:              ":8080",

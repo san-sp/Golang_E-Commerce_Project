@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/brand"
+	brandpkg "github.com/san-sp/Golang_E-Commerce_Project/internal/brand"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/cart"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/category"
 	categorypkg "github.com/san-sp/Golang_E-Commerce_Project/internal/category"
@@ -30,6 +32,7 @@ type Handler struct {
 	orderService       *order.Service
 	productService     *product.Service
 	categoryService    *category.Service
+	brandService       *brandpkg.Service
 }
 
 func NewHandler(
@@ -41,6 +44,7 @@ func NewHandler(
 	orderService *order.Service,
 	productService *product.Service,
 	categoryService *category.Service,
+	brandService *brandpkg.Service,
 ) *Handler {
 	return &Handler{
 		paymentService:     paymentService,
@@ -51,6 +55,7 @@ func NewHandler(
 		orderService:       orderService,
 		productService:     productService,
 		categoryService:    categoryService,
+		brandService:       brandService,
 	}
 }
 
@@ -1423,4 +1428,256 @@ func (h *Handler) CancelOrder(c *gin.Context) {
 			"reservations": reservations,
 		},
 	)
+}
+
+// Brand
+func (h *Handler) CreateBrand(c *gin.Context) {
+	var request struct {
+		Name string `json:"name"`
+		Slug string `json:"slug"`
+	}
+
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid request body",
+		})
+		return
+	}
+
+	createdBrand, err := h.brandService.CreateBrand(
+		c.Request.Context(),
+		request.Name,
+		request.Slug,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, brand.ErrBrandNameEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, brand.ErrBrandSlugEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusCreated, createdBrand)
+}
+
+func (h *Handler) ListBrands(c *gin.Context) {
+	brands, err := h.brandService.ListBrands(
+		c.Request.Context(),
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, brands)
+}
+
+func (h *Handler) GetBrand(c *gin.Context) {
+	brandID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid brand ID",
+		})
+		return
+	}
+
+	result, err := h.brandService.GetBrand(
+		c.Request.Context(),
+		brandID,
+	)
+	if err != nil {
+		if errors.Is(err, brandpkg.ErrBrandNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "brand not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) GetBrandBySlug(c *gin.Context) {
+	result, err := h.brandService.GetBrandBySlug(
+		c.Request.Context(),
+		c.Param("slug"),
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, brandpkg.ErrBrandSlugEmpty):
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+
+		case errors.Is(err, brandpkg.ErrBrandNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "brand not found",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) AssignProductBrand(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid product ID",
+		})
+		return
+	}
+
+	brandID, err := uuid.Parse(c.Param("brandID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid brand ID",
+		})
+		return
+	}
+
+	err = h.brandService.AssignProductBrand(
+		c.Request.Context(),
+		productID,
+		brandID,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, brandpkg.ErrProductNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "product not found",
+			})
+
+		case errors.Is(err, brandpkg.ErrBrandNotFound):
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "brand not found",
+			})
+
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": "internal server error",
+			})
+		}
+
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) ClearProductBrand(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid product ID",
+		})
+		return
+	}
+
+	err = h.brandService.ClearProductBrand(
+		c.Request.Context(),
+		productID,
+	)
+	if err != nil {
+		if errors.Is(err, brandpkg.ErrProductNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "product not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) GetProductBrand(c *gin.Context) {
+	productID, err := uuid.Parse(c.Param("productID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid product ID",
+		})
+		return
+	}
+
+	result, err := h.brandService.GetProductBrand(
+		c.Request.Context(),
+		productID,
+	)
+	if err != nil {
+		if errors.Is(err, brandpkg.ErrProductBrandNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "product brand not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, result)
+}
+
+func (h *Handler) ListBrandProducts(c *gin.Context) {
+	brandID, err := uuid.Parse(c.Param("brandID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid brand ID",
+		})
+		return
+	}
+
+	products, err := h.brandService.ListBrandProducts(
+		c.Request.Context(),
+		brandID,
+	)
+	if err != nil {
+		if errors.Is(err, brandpkg.ErrBrandNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error": "brand not found",
+			})
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, products)
 }
