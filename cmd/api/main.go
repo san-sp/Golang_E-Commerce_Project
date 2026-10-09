@@ -173,6 +173,7 @@ func main() {
 
 	// Inventory
 	api.GET("/inventory/:variantID", handler.GetInventory)
+	api.GET("/inventory/:variantID/movements", handler.ListInventoryMovements)
 
 	server := &http.Server{
 		Addr:              ":8080",

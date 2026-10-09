@@ -591,3 +591,101 @@ func TestAdjustInventoryRejectsInvalidMovements(t *testing.T) {
 		t.Errorf("expected no movement records, got %d", len(movements))
 	}
 }
+
+func TestListInventoryMovements(t *testing.T) {
+	ctx, pool, queries, cleanup := setupInventoryTest(t)
+	defer cleanup()
+
+	service := NewService(pool, queries)
+	variantID := createInventoryTestFixture(t, ctx, pool, queries, 10)
+
+	referenceType := "PURCHASE_ORDER"
+	referenceID := uuid.New()
+
+	_, err := service.AdjustInventory(
+		ctx,
+		variantID,
+		5,
+		MovementTypeRestock,
+		&referenceType,
+		&referenceID,
+	)
+	if err != nil {
+		t.Fatalf("restock inventory: %v", err)
+	}
+
+	_, err = service.AdjustInventory(
+		ctx,
+		variantID,
+		-2,
+		MovementTypeDamage,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("record inventory damage: %v", err)
+	}
+
+	movements, err := service.ListInventoryMovements(ctx, variantID)
+	if err != nil {
+		t.Fatalf("list inventory movements: %v", err)
+	}
+
+	if len(movements) != 2 {
+		t.Fatalf("expected 2 movements, got %d", len(movements))
+	}
+
+	// The query returns the newest movement first.
+	if movements[0].MovementType != MovementTypeDamage {
+		t.Errorf(
+			"expected newest movement to be DAMAGE, got %q",
+			movements[0].MovementType,
+		)
+	}
+
+	if movements[0].Quantity != -2 {
+		t.Errorf("expected newest movement quantity -2, got %d", movements[0].Quantity)
+	}
+
+	if movements[1].MovementType != MovementTypeRestock {
+		t.Errorf(
+			"expected older movement to be RESTOCK, got %q",
+			movements[1].MovementType,
+		)
+	}
+
+	if movements[1].Quantity != 5 {
+		t.Errorf("expected restock quantity 5, got %d", movements[1].Quantity)
+	}
+
+	if movements[1].ReferenceType == nil ||
+		*movements[1].ReferenceType != referenceType {
+		t.Errorf("expected reference type %q", referenceType)
+	}
+
+	if movements[1].ReferenceID == nil ||
+		*movements[1].ReferenceID != referenceID {
+		t.Errorf("expected reference ID %s", referenceID)
+	}
+}
+
+func TestListInventoryMovementsEmpty(t *testing.T) {
+	ctx, pool, queries, cleanup := setupInventoryTest(t)
+	defer cleanup()
+
+	service := NewService(pool, queries)
+	variantID := createInventoryTestFixture(t, ctx, pool, queries, 10)
+
+	movements, err := service.ListInventoryMovements(ctx, variantID)
+	if err != nil {
+		t.Fatalf("list inventory movements: %v", err)
+	}
+
+	if movements == nil {
+		t.Fatal("expected an empty slice, got nil")
+	}
+
+	if len(movements) != 0 {
+		t.Errorf("expected 0 movements, got %d", len(movements))
+	}
+}

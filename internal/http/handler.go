@@ -1716,3 +1716,28 @@ func (h *Handler) GetInventory(c *gin.Context) {
 
 	c.JSON(http.StatusOK, result)
 }
+
+func (h *Handler) ListInventoryMovements(c *gin.Context) {
+	variantID, err := uuid.Parse(c.Param("variantID"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid variant ID",
+		})
+		return
+	}
+
+	movements, err := h.inventoryService.ListInventoryMovements(
+		c.Request.Context(),
+		variantID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "internal server error",
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"movements": movements,
+	})
+}

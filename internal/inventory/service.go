@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -32,6 +33,16 @@ type Inventory struct {
 	Quantity          int64
 	ReservedQuantity  int64
 	AvailableQuantity int64
+}
+
+type InventoryMovement struct {
+	ID            uuid.UUID
+	VariantID     uuid.UUID
+	MovementType  MovementType
+	Quantity      int64
+	ReferenceType *string
+	ReferenceID   *uuid.UUID
+	CreatedAt     time.Time
 }
 
 type Service struct {
@@ -69,6 +80,47 @@ func (s *Service) GetInventory(
 		ReservedQuantity:  row.ReservedQuantity,
 		AvailableQuantity: row.AvailableQuantity,
 	}, nil
+}
+
+func (s *Service) ListInventoryMovements(
+	ctx context.Context,
+	variantID uuid.UUID,
+) ([]InventoryMovement, error) {
+	variant := pgtype.UUID{
+		Bytes: variantID,
+		Valid: true,
+	}
+
+	rows, err := s.queries.ListInventoryMovements(ctx, variant)
+	if err != nil {
+		return nil, fmt.Errorf("list inventory movements: %w", err)
+	}
+
+	movements := make([]InventoryMovement, 0, len(rows))
+
+	for _, row := range rows {
+		movement := InventoryMovement{
+			ID:           uuid.UUID(row.ID.Bytes),
+			VariantID:    uuid.UUID(row.VariantID.Bytes),
+			MovementType: MovementType(row.MovementType),
+			Quantity:     row.Quantity,
+			CreatedAt:    row.CreatedAt.Time,
+		}
+
+		if row.ReferenceType.Valid {
+			referenceType := row.ReferenceType.String
+			movement.ReferenceType = &referenceType
+		}
+
+		if row.ReferenceID.Valid {
+			referenceID := uuid.UUID(row.ReferenceID.Bytes)
+			movement.ReferenceID = &referenceID
+		}
+
+		movements = append(movements, movement)
+	}
+
+	return movements, nil
 }
 
 func (s *Service) AdjustInventory(
