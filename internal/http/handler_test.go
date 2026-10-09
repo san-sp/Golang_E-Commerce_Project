@@ -3995,3 +3995,106 @@ func TestListInventoryMovementsHandlerInvalidPagination(t *testing.T) {
 		})
 	}
 }
+
+func TestListInventoryMovementsHandlerPagination(t *testing.T) {
+	ctx, pool, queries, handler := setupInventoryHTTPTest(t)
+
+	variantID := createHTTPTestInventory(t, pool)
+	service := inventory.NewService(pool, queries)
+
+	// Create the older movement first.
+	_, err := service.AdjustInventory(
+		ctx,
+		uuid.UUID(variantID.Bytes),
+		5,
+		inventory.MovementTypeRestock,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("restock inventory: %v", err)
+	}
+
+	// Create the newer movement second.
+	_, err = service.AdjustInventory(
+		ctx,
+		uuid.UUID(variantID.Bytes),
+		-2,
+		inventory.MovementTypeDamage,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("record inventory damage: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET(
+		"/api/v1/inventory/:variantID/movements",
+		handler.ListInventoryMovements,
+	)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/inventory/"+
+			uuid.UUID(variantID.Bytes).String()+
+			"/movements?limit=1&offset=1",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Movements []struct {
+			MovementType string `json:"MovementType"`
+			Quantity     int64  `json:"Quantity"`
+		} `json:"movements"`
+		Limit  int `json:"limit"`
+		Offset int `json:"offset"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Limit != 1 || response.Offset != 1 {
+		t.Fatalf(
+			"expected limit=1 and offset=1, got limit=%d offset=%d",
+			response.Limit,
+			response.Offset,
+		)
+	}
+
+	if len(response.Movements) != 1 {
+		t.Fatalf(
+			"expected 1 movement, got %d",
+			len(response.Movements),
+		)
+	}
+
+	if response.Movements[0].MovementType != "RESTOCK" {
+		t.Errorf(
+			"expected RESTOCK after skipping newest movement, got %q",
+			response.Movements[0].MovementType,
+		)
+	}
+
+	if response.Movements[0].Quantity != 5 {
+		t.Errorf(
+			"expected quantity 5, got %d",
+			response.Movements[0].Quantity,
+		)
+	}
+}
