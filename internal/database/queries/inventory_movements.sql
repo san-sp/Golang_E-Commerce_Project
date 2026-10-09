@@ -16,6 +16,7 @@ RETURNING
     reference_id,
     created_at;
 
+
 -- name: ListInventoryMovements :many
 SELECT
     id,
@@ -27,4 +28,6 @@ SELECT
     created_at
 FROM inventory_movements
 WHERE variant_id = $1
-ORDER BY created_at DESC;
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+OFFSET $3;

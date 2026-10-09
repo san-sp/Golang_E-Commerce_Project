@@ -313,9 +313,13 @@ func TestAdjustInventoryRestock(t *testing.T) {
 
 	movements, err := queries.ListInventoryMovements(
 		ctx,
-		pgtype.UUID{
-			Bytes: variantID,
-			Valid: true,
+		db.ListInventoryMovementsParams{
+			VariantID: pgtype.UUID{
+				Bytes: variantID,
+				Valid: true,
+			},
+			Limit:  20,
+			Offset: 0,
 		},
 	)
 	if err != nil {
@@ -380,7 +384,14 @@ func TestAdjustInventoryDamage(t *testing.T) {
 
 	movements, err := queries.ListInventoryMovements(
 		ctx,
-		pgtype.UUID{Bytes: variantID, Valid: true},
+		db.ListInventoryMovementsParams{
+			VariantID: pgtype.UUID{
+				Bytes: variantID,
+				Valid: true,
+			},
+			Limit:  20,
+			Offset: 0,
+		},
 	)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
@@ -436,7 +447,14 @@ func TestAdjustInventoryInsufficientStock(t *testing.T) {
 
 	movements, err := queries.ListInventoryMovements(
 		ctx,
-		pgtype.UUID{Bytes: variantID, Valid: true},
+		db.ListInventoryMovementsParams{
+			VariantID: pgtype.UUID{
+				Bytes: variantID,
+				Valid: true,
+			},
+			Limit:  20,
+			Offset: 0,
+		},
 	)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
@@ -500,7 +518,14 @@ func TestAdjustInventoryCannotReduceBelowReservedQuantity(t *testing.T) {
 
 	movements, err := queries.ListInventoryMovements(
 		ctx,
-		pgtype.UUID{Bytes: variantID, Valid: true},
+		db.ListInventoryMovementsParams{
+			VariantID: pgtype.UUID{
+				Bytes: variantID,
+				Valid: true,
+			},
+			Limit:  20,
+			Offset: 0,
+		},
 	)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
@@ -581,7 +606,14 @@ func TestAdjustInventoryRejectsInvalidMovements(t *testing.T) {
 
 	movements, err := queries.ListInventoryMovements(
 		ctx,
-		pgtype.UUID{Bytes: variantID, Valid: true},
+		db.ListInventoryMovementsParams{
+			VariantID: pgtype.UUID{
+				Bytes: variantID,
+				Valid: true,
+			},
+			Limit:  20,
+			Offset: 0,
+		},
 	)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
@@ -626,7 +658,7 @@ func TestListInventoryMovements(t *testing.T) {
 		t.Fatalf("record inventory damage: %v", err)
 	}
 
-	movements, err := service.ListInventoryMovements(ctx, variantID)
+	movements, err := service.ListInventoryMovements(ctx, variantID, 20, 0)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
 	}
@@ -676,7 +708,7 @@ func TestListInventoryMovementsEmpty(t *testing.T) {
 	service := NewService(pool, queries)
 	variantID := createInventoryTestFixture(t, ctx, pool, queries, 10)
 
-	movements, err := service.ListInventoryMovements(ctx, variantID)
+	movements, err := service.ListInventoryMovements(ctx, variantID, 20, 0)
 	if err != nil {
 		t.Fatalf("list inventory movements: %v", err)
 	}

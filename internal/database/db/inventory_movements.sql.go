@@ -70,11 +70,19 @@ SELECT
     created_at
 FROM inventory_movements
 WHERE variant_id = $1
-ORDER BY created_at DESC
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+OFFSET $3
 `
 
-func (q *Queries) ListInventoryMovements(ctx context.Context, variantID pgtype.UUID) ([]InventoryMovement, error) {
-	rows, err := q.db.Query(ctx, listInventoryMovements, variantID)
+type ListInventoryMovementsParams struct {
+	VariantID pgtype.UUID
+	Limit     int32
+	Offset    int32
+}
+
+func (q *Queries) ListInventoryMovements(ctx context.Context, arg ListInventoryMovementsParams) ([]InventoryMovement, error) {
+	rows, err := q.db.Query(ctx, listInventoryMovements, arg.VariantID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}

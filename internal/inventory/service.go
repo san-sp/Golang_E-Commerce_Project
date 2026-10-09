@@ -85,13 +85,22 @@ func (s *Service) GetInventory(
 func (s *Service) ListInventoryMovements(
 	ctx context.Context,
 	variantID uuid.UUID,
+	limit int32,
+	offset int32,
 ) ([]InventoryMovement, error) {
 	variant := pgtype.UUID{
 		Bytes: variantID,
 		Valid: true,
 	}
 
-	rows, err := s.queries.ListInventoryMovements(ctx, variant)
+	rows, err := s.queries.ListInventoryMovements(
+		ctx,
+		db.ListInventoryMovementsParams{
+			VariantID: variant,
+			Limit:     limit,
+			Offset:    offset,
+		},
+	)
 	if err != nil {
 		return nil, fmt.Errorf("list inventory movements: %w", err)
 	}

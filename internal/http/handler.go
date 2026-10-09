@@ -1726,18 +1726,52 @@ func (h *Handler) ListInventoryMovements(c *gin.Context) {
 		return
 	}
 
+	const (
+		defaultLimit = 20
+		maxLimit     = 100
+	)
+
+	limit := defaultLimit
+	offset := 0
+
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		parsedLimit, err := strconv.Atoi(rawLimit)
+		if err != nil || parsedLimit < 1 || parsedLimit > maxLimit {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "limit must be between 1 and 100",
+			})
+			return
+		}
+		limit = parsedLimit
+	}
+
+	if rawOffset := c.Query("offset"); rawOffset != "" {
+		parsedOffset, err := strconv.Atoi(rawOffset)
+		if err != nil || parsedOffset < 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "offset must be a non-negative integer",
+			})
+			return
+		}
+		offset = parsedOffset
+	}
+
 	movements, err := h.inventoryService.ListInventoryMovements(
 		c.Request.Context(),
 		variantID,
+		int32(limit),
+		int32(offset),
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "internal server error",
+			"error": "failed to list inventory movements",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"movements": movements,
+		"limit":     limit,
+		"offset":    offset,
 	})
 }
