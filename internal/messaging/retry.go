@@ -6,8 +6,16 @@ import (
 	"github.com/rabbitmq/amqp091-go"
 )
 
+type messagePublisher interface {
+	Publish(
+		exchange string,
+		routingKey string,
+		message amqp091.Publishing,
+	) error
+}
+
 type RetryPolicy struct {
-	publisher       *Publisher
+	publisher       messagePublisher
 	maxRetries      int
 	retryExchange   string
 	retryRoutingKey string
@@ -16,7 +24,7 @@ type RetryPolicy struct {
 }
 
 func NewRetryPolicy(
-	publisher *Publisher,
+	publisher messagePublisher,
 	maxRetries int,
 	retryExchange string,
 	retryRoutingKey string,
@@ -38,41 +46,52 @@ func (r *RetryPolicy) Handle(message amqp091.Delivery) error {
 
 	if value, ok := message.Headers["retry-count"]; ok {
 		count, ok := value.(int32)
-
 		if !ok {
-			return fmt.Errorf("invalid retry-count header type: %T", value)
+			return fmt.Errorf(
+				"invalid retry-count header type: %T",
+				value,
+			)
 		}
 
 		retryCount = int(count)
+	}
+
+	headers := make(amqp091.Table, len(message.Headers)+1)
+	for key, value := range message.Headers {
+		headers[key] = value
+	}
+
+	publishing := amqp091.Publishing{
+		Headers:         headers,
+		ContentType:     message.ContentType,
+		ContentEncoding: message.ContentEncoding,
+		DeliveryMode:    message.DeliveryMode,
+		Priority:        message.Priority,
+		CorrelationId:   message.CorrelationId,
+		ReplyTo:         message.ReplyTo,
+		Expiration:      message.Expiration,
+		MessageId:       message.MessageId,
+		Timestamp:       message.Timestamp,
+		Type:            message.Type,
+		UserId:          message.UserId,
+		AppId:           message.AppId,
+		Body:            message.Body,
 	}
 
 	if retryCount >= r.maxRetries {
 		return r.publisher.Publish(
 			r.dlqExchange,
 			r.dlqRoutingKey,
-			amqp091.Publishing{
-				ContentType:  message.ContentType,
-				DeliveryMode: message.DeliveryMode,
-				Headers:      message.Headers,
-				Body:         message.Body,
-			},
+			publishing,
 		)
 	}
 
 	retryCount++
-
-	headers := amqp091.Table{
-		"retry-count": int32(retryCount),
-	}
+	headers["retry-count"] = int32(retryCount)
 
 	return r.publisher.Publish(
 		r.retryExchange,
 		r.retryRoutingKey,
-		amqp091.Publishing{
-			ContentType:  message.ContentType,
-			DeliveryMode: message.DeliveryMode,
-			Headers:      headers,
-			Body:         message.Body,
-		},
+		publishing,
 	)
 }
