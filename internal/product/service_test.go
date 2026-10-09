@@ -596,14 +596,14 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		t.Fatalf("failed to create expensive product: %v", err)
 	}
 
-	// Cheap product has variants priced at 500 and 700.
-	// Its listing price should therefore be 500.
+	// Cheap product has variants priced at 1 and 2.
+	// Its listing price should therefore be 1.
 	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
 		ProductID: productCheap.ID,
 		Sku:       "PRICE-ASC-CHEAP-1-" + testID,
 		Size:      pgtype.Text{String: "S", Valid: true},
 		Color:     pgtype.Text{String: "Black", Valid: true},
-		Price:     500,
+		Price:     1,
 	})
 	if err != nil {
 		t.Fatalf("failed to create cheap variant 1: %v", err)
@@ -614,20 +614,20 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		Sku:       "PRICE-ASC-CHEAP-2-" + testID,
 		Size:      pgtype.Text{String: "M", Valid: true},
 		Color:     pgtype.Text{String: "Black", Valid: true},
-		Price:     700,
+		Price:     2,
 	})
 	if err != nil {
 		t.Fatalf("failed to create cheap variant 2: %v", err)
 	}
 
-	// Expensive product has variants priced at 1000 and 1200.
-	// Its listing price should therefore be 1000.
+	// Expensive product has variants priced at 3 and 4.
+	// Its listing price should therefore be 3.
 	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
 		ProductID: productExpensive.ID,
 		Sku:       "PRICE-ASC-EXPENSIVE-1-" + testID,
 		Size:      pgtype.Text{String: "S", Valid: true},
 		Color:     pgtype.Text{String: "Blue", Valid: true},
-		Price:     1000,
+		Price:     3,
 	})
 	if err != nil {
 		t.Fatalf("failed to create expensive variant 1: %v", err)
@@ -638,7 +638,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		Sku:       "PRICE-ASC-EXPENSIVE-2-" + testID,
 		Size:      pgtype.Text{String: "M", Valid: true},
 		Color:     pgtype.Text{String: "Blue", Valid: true},
-		Price:     1200,
+		Price:     4,
 	})
 	if err != nil {
 		t.Fatalf("failed to create expensive variant 2: %v", err)
