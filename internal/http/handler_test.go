@@ -856,7 +856,7 @@ func TestListInventoryMovementsHandlerSuccess(t *testing.T) {
 
 	request := httptest.NewRequest(
 		http.MethodGet,
-		"/api/v1/inventory/"+uuid.UUID(variantID.Bytes).String()+"/movements",
+		"/api/v1/inventory/"+uuid.UUID(variantID.Bytes).String()+"/movements?limit=10&offset=0",
 		nil,
 	)
 
@@ -877,10 +877,20 @@ func TestListInventoryMovementsHandlerSuccess(t *testing.T) {
 			MovementType string `json:"MovementType"`
 			Quantity     int64  `json:"Quantity"`
 		} `json:"movements"`
+		Limit  int `json:"limit"`
+		Offset int `json:"offset"`
 	}
 
 	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Limit != 10 {
+		t.Errorf("expected limit 10, got %d", response.Limit)
+	}
+
+	if response.Offset != 0 {
+		t.Errorf("expected offset 0, got %d", response.Offset)
 	}
 
 	if len(response.Movements) != 2 {
@@ -3919,5 +3929,69 @@ func TestCancelOrderHandlerConfirmedOrder(t *testing.T) {
 			"expected error code ORDER_CANNOT_BE_CANCELLED, got %s",
 			response.Error.Code,
 		)
+	}
+}
+
+func TestListInventoryMovementsHandlerInvalidPagination(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+	}{
+		{
+			name:  "zero limit",
+			query: "?limit=0",
+		},
+		{
+			name:  "limit exceeds maximum",
+			query: "?limit=101",
+		},
+		{
+			name:  "non-numeric limit",
+			query: "?limit=abc",
+		},
+		{
+			name:  "negative offset",
+			query: "?offset=-1",
+		},
+		{
+			name:  "non-numeric offset",
+			query: "?offset=abc",
+		},
+		{
+			name:  "offset exceeds int32 range",
+			query: "?offset=2147483648",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, _, handler := setupInventoryHTTPTest(t)
+
+			gin.SetMode(gin.TestMode)
+
+			router := gin.New()
+			router.GET(
+				"/api/v1/inventory/:variantID/movements",
+				handler.ListInventoryMovements,
+			)
+
+			request := httptest.NewRequest(
+				http.MethodGet,
+				"/api/v1/inventory/"+uuid.New().String()+"/movements"+tt.query,
+				nil,
+			)
+
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf(
+					"expected status %d, got %d: %s",
+					http.StatusBadRequest,
+					recorder.Code,
+					recorder.Body.String(),
+				)
+			}
+		})
 	}
 }

@@ -2,6 +2,7 @@ package http
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 
@@ -1747,9 +1748,9 @@ func (h *Handler) ListInventoryMovements(c *gin.Context) {
 
 	if rawOffset := c.Query("offset"); rawOffset != "" {
 		parsedOffset, err := strconv.Atoi(rawOffset)
-		if err != nil || parsedOffset < 0 {
+		if err != nil || parsedOffset < 0 || int64(parsedOffset) > math.MaxInt32 {
 			c.JSON(http.StatusBadRequest, gin.H{
-				"error": "offset must be a non-negative integer",
+				"error": "offset must be a non-negative integer within the supported range",
 			})
 			return
 		}
