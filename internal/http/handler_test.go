@@ -22,6 +22,7 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/checkout"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
+	"github.com/san-sp/Golang_E-Commerce_Project/internal/inventory"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/payment"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/product"
@@ -735,6 +736,226 @@ func setupBrandHTTPTest(t *testing.T) (
 	}
 
 	return ctx, pool, queries, cleanup
+}
+
+func setupInventoryHTTPTest(t *testing.T) (
+	context.Context,
+	*pgxpool.Pool,
+	*db.Queries,
+	*Handler,
+) {
+	t.Helper()
+
+	if err := godotenv.Load("../../.env"); err != nil {
+		t.Fatalf("load .env: %v", err)
+	}
+
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		t.Fatal("DATABASE_URL is not set")
+	}
+
+	ctx := context.Background()
+
+	pool, err := database.NewPostgres(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("connect to PostgreSQL: %v", err)
+	}
+
+	t.Cleanup(func() {
+		pool.Close()
+	})
+
+	queries := db.New(pool)
+	inventoryService := inventory.NewService(pool, queries)
+
+	handler := NewHandler(
+		nil, // paymentService
+		nil, // refundService
+		nil, // reservationService
+		nil, // cartService
+		nil, // checkoutService
+		nil, // orderService
+		nil, // productService
+		nil, // categoryService
+		nil, // brandService
+		inventoryService,
+	)
+
+	return ctx, pool, queries, handler
+}
+
+func TestListInventoryMovementsHandlerInvalidVariantID(t *testing.T) {
+	_, _, _, handler := setupInventoryHTTPTest(t)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET(
+		"/api/v1/inventory/:variantID/movements",
+		handler.ListInventoryMovements,
+	)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/inventory/not-a-uuid/movements",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusBadRequest,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+}
+
+func TestListInventoryMovementsHandlerSuccess(t *testing.T) {
+	ctx, pool, queries, handler := setupInventoryHTTPTest(t)
+
+	variantID := createHTTPTestInventory(t, pool)
+
+	inventoryService := inventory.NewService(pool, queries)
+
+	_, err := inventoryService.AdjustInventory(
+		ctx,
+		uuid.UUID(variantID.Bytes),
+		5,
+		inventory.MovementTypeRestock,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("restock inventory: %v", err)
+	}
+
+	_, err = inventoryService.AdjustInventory(
+		ctx,
+		uuid.UUID(variantID.Bytes),
+		-2,
+		inventory.MovementTypeDamage,
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("record inventory damage: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET(
+		"/api/v1/inventory/:variantID/movements",
+		handler.ListInventoryMovements,
+	)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/inventory/"+uuid.UUID(variantID.Bytes).String()+"/movements",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Movements []struct {
+			MovementType string `json:"MovementType"`
+			Quantity     int64  `json:"Quantity"`
+		} `json:"movements"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(response.Movements) != 2 {
+		t.Fatalf("expected 2 movements, got %d", len(response.Movements))
+	}
+
+	if response.Movements[0].MovementType != "DAMAGE" {
+		t.Errorf(
+			"expected newest movement DAMAGE, got %q",
+			response.Movements[0].MovementType,
+		)
+	}
+
+	if response.Movements[0].Quantity != -2 {
+		t.Errorf("expected damage quantity -2, got %d", response.Movements[0].Quantity)
+	}
+
+	if response.Movements[1].MovementType != "RESTOCK" {
+		t.Errorf(
+			"expected older movement RESTOCK, got %q",
+			response.Movements[1].MovementType,
+		)
+	}
+
+	if response.Movements[1].Quantity != 5 {
+		t.Errorf("expected restock quantity 5, got %d", response.Movements[1].Quantity)
+	}
+}
+
+func TestListInventoryMovementsHandlerEmpty(t *testing.T) {
+	_, pool, _, handler := setupInventoryHTTPTest(t)
+
+	variantID := createHTTPTestInventory(t, pool)
+
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+	router.GET(
+		"/api/v1/inventory/:variantID/movements",
+		handler.ListInventoryMovements,
+	)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/inventory/"+uuid.UUID(variantID.Bytes).String()+"/movements",
+		nil,
+	)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf(
+			"expected status %d, got %d: %s",
+			http.StatusOK,
+			recorder.Code,
+			recorder.Body.String(),
+		)
+	}
+
+	var response struct {
+		Movements []json.RawMessage `json:"movements"`
+	}
+
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if response.Movements == nil {
+		t.Fatal("expected an empty movements array, got nil")
+	}
+
+	if len(response.Movements) != 0 {
+		t.Fatalf("expected 0 movements, got %d", len(response.Movements))
+	}
 }
 
 func TestBrandHTTP(t *testing.T) {
@@ -2938,9 +3159,9 @@ func TestCreateReservationHandler(t *testing.T) {
 	)
 
 	requestBody := map[string]any{
-    "variant_id": variantID.String(),
-    "quantity":   1,
-}
+		"variant_id": variantID.String(),
+		"quantity":   1,
+	}
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -3074,9 +3295,9 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 	)
 
 	requestBody := map[string]any{
-    "variant_id": variantID.String(),
-    "quantity":   999999,
-}
+		"variant_id": variantID.String(),
+		"quantity":   999999,
+	}
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
