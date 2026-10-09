@@ -101,16 +101,84 @@ func setupCheckoutHandler(t *testing.T) (
 	return handler, queries, provider, pool
 }
 
-func checkoutTestVariantID() pgtype.UUID {
-	return pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
+func createHTTPTestInventory(
+	t *testing.T,
+	pool *pgxpool.Pool,
+) pgtype.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+
+	var productID pgtype.UUID
+
+	err := pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+         VALUES ('HTTP Test Product', 'Test product')
+         RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
 	}
+
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+            product_id,
+            sku,
+            price
+         )
+         VALUES (
+            $1,
+            'http-test-' || gen_random_uuid()::text,
+            899900
+         )
+         RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (variant_id, quantity)
+         VALUES ($1, 10)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM reservations WHERE variant_id = $1`,
+			variantID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM inventory WHERE variant_id = $1`,
+			variantID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id = $1`,
+			variantID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productID,
+		)
+	})
+
+	return variantID
 }
 
 // Product
@@ -2295,6 +2363,8 @@ func TestCheckoutHandlerSuccess(t *testing.T) {
 
 	ctx := context.Background()
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
 		t.Fatalf("create cart: %v", err)
@@ -2312,7 +2382,7 @@ func TestCheckoutHandlerSuccess(t *testing.T) {
 		ctx,
 		db.AddCartItemParams{
 			CartID:    cart.ID,
-			VariantID: checkoutTestVariantID(),
+			VariantID: variantID,
 			Quantity:  1,
 		},
 	)
@@ -2610,6 +2680,8 @@ func TestCheckoutHandlerProviderFailed(t *testing.T) {
 
 	ctx := context.Background()
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	provider.SetFailure(true)
 
 	cart, err := queries.CreateCart(ctx)
@@ -2629,7 +2701,7 @@ func TestCheckoutHandlerProviderFailed(t *testing.T) {
 		ctx,
 		db.AddCartItemParams{
 			CartID:    cart.ID,
-			VariantID: checkoutTestVariantID(),
+			VariantID: variantID,
 			Quantity:  1,
 		},
 	)
@@ -2712,6 +2784,8 @@ func TestCheckoutHandlerProviderUnknown(t *testing.T) {
 
 	ctx := context.Background()
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	provider.SetUnknown()
 
 	cart, err := queries.CreateCart(ctx)
@@ -2731,7 +2805,7 @@ func TestCheckoutHandlerProviderUnknown(t *testing.T) {
 		ctx,
 		db.AddCartItemParams{
 			CartID:    cart.ID,
-			VariantID: checkoutTestVariantID(),
+			VariantID: variantID,
 			Quantity:  1,
 		},
 	)
@@ -2831,6 +2905,8 @@ func TestCreateReservationHandler(t *testing.T) {
 		pool.Close()
 	})
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	queries := db.New(pool)
 
 	reservationService := reservation.NewService(
@@ -2862,9 +2938,9 @@ func TestCreateReservationHandler(t *testing.T) {
 	)
 
 	requestBody := map[string]any{
-		"variant_id": "c5174f98-5ba2-453e-92fb-266e818fbd92",
-		"quantity":   1,
-	}
+    "variant_id": variantID.String(),
+    "quantity":   1,
+}
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -2965,6 +3041,8 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 		pool.Close()
 	})
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	queries := db.New(pool)
 
 	reservationService := reservation.NewService(
@@ -2996,9 +3074,9 @@ func TestCreateReservationHandlerInsufficientStock(t *testing.T) {
 	)
 
 	requestBody := map[string]any{
-		"variant_id": "c5174f98-5ba2-453e-92fb-266e818fbd92",
-		"quantity":   999999,
-	}
+    "variant_id": variantID.String(),
+    "quantity":   999999,
+}
 
 	body, err := json.Marshal(requestBody)
 	if err != nil {
@@ -3059,6 +3137,8 @@ func TestGetOrderHandler(t *testing.T) {
 
 	ctx := context.Background()
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	orderRecord, err := queries.CreateOrder(
 		ctx,
 		db.CreateOrderParams{
@@ -3074,7 +3154,7 @@ func TestGetOrderHandler(t *testing.T) {
 		ctx,
 		db.CreateOrderItemParams{
 			OrderID:   orderRecord.ID,
-			VariantID: checkoutTestVariantID(),
+			VariantID: variantID,
 			Quantity:  2,
 			UnitPrice: 899900,
 		},
@@ -3244,6 +3324,8 @@ func TestCancelOrderHandler(t *testing.T) {
 
 	ctx := context.Background()
 
+	variantID := createHTTPTestInventory(t, pool)
+
 	// Create cart.
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
@@ -3263,7 +3345,7 @@ func TestCancelOrderHandler(t *testing.T) {
 		ctx,
 		db.AddCartItemParams{
 			CartID:    cart.ID,
-			VariantID: checkoutTestVariantID(),
+			VariantID: variantID,
 			Quantity:  1,
 		},
 	)

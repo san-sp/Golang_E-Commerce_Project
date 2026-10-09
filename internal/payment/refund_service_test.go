@@ -227,29 +227,32 @@ func cleanupRefundFixture(
 	ctx := context.Background()
 
 	// Refunds first because they reference payments.
+	// Outbox events first because refund IDs are stored in the payload.
 	_, err := fixture.pool.Exec(
 		ctx,
+		`DELETE FROM outbox_events
+     WHERE payload->>'payment_id' = $1
+        OR payload->>'refund_id' IN (
+            SELECT id::text
+            FROM refunds
+            WHERE payment_id = $2
+        )`,
+		fixture.payment.ID.String(),
+		fixture.payment.ID,
+	)
+	if err != nil {
+		t.Logf("cleanup outbox events failed: %v", err)
+	}
+
+	// Refunds reference payments.
+	_, err = fixture.pool.Exec(
+		ctx,
 		`DELETE FROM refunds
-		 WHERE payment_id = $1`,
+     WHERE payment_id = $1`,
 		fixture.payment.ID,
 	)
 	if err != nil {
 		t.Logf("cleanup refunds failed: %v", err)
-	}
-
-	_, err = fixture.pool.Exec(
-		ctx,
-		`DELETE FROM outbox_events
-		 WHERE payload->>'payment_id' = $1
-		    OR payload->>'refund_id' IN (
-				SELECT id::text
-				FROM refunds
-				WHERE payment_id = $1
-		   )`,
-		fixture.payment.ID.String(),
-	)
-	if err != nil {
-		t.Logf("cleanup outbox events failed: %v", err)
 	}
 
 	_, err = fixture.pool.Exec(
@@ -808,7 +811,7 @@ func TestCreateRefundRollback(t *testing.T) {
 		 FROM outbox_events
 		 WHERE event_type = 'PAYMENT_REFUNDED'
 		   AND payload->>'payment_id' = $1`,
-		fixture.payment.ID.String(),
+		fixture.payment.ID,
 	).Scan(&outboxCount)
 	if err != nil {
 		t.Fatalf("query refund outbox count: %v", err)

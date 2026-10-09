@@ -36,15 +36,7 @@ func TestWorkerProcessOnce(t *testing.T) {
 
 	queries := db.New(pool)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createReservationTestInventory(t, pool)
 
 	reservation, err := queries.CreateReservation(ctx, db.CreateReservationParams{
 		VariantID: variantID,
@@ -57,17 +49,6 @@ func TestWorkerProcessOnce(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create expired reservation: %v", err)
 	}
-
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			reservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup reservation failed: %v", err)
-		}
-	})
 
 	worker := NewWorker(
 		queries,

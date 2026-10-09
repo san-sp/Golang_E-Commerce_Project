@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
@@ -14,6 +15,105 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/order"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/reservation"
 )
+
+func createPaymentTestInventory(
+	t *testing.T,
+	pool *pgxpool.Pool,
+) pgtype.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+
+	var productID pgtype.UUID
+
+	err := pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+		 VALUES ('Payment Test Product', 'Test product')
+		 RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+			product_id,
+			sku,
+			price
+		)
+		VALUES (
+			$1,
+			'payment-test-' || gen_random_uuid()::text,
+			899900
+		)
+		RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (
+			variant_id,
+			quantity
+		)
+		VALUES ($1, 10)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM reservations
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservations failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM inventory
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup inventory failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants
+			 WHERE id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup product variant failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM products
+			 WHERE id = $1`,
+			productID,
+		)
+		if err != nil {
+			t.Logf("cleanup product failed: %v", err)
+		}
+	})
+
+	return variantID
+}
 
 func TestCreatePayment(t *testing.T) {
 	err := godotenv.Load("../../.env")
@@ -54,15 +154,7 @@ func TestCreatePayment(t *testing.T) {
 
 	orderService := order.NewService(pool, queries)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createPaymentTestInventory(t, pool)
 
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
@@ -220,15 +312,7 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 
 	orderService := order.NewService(pool, queries)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createPaymentTestInventory(t, pool)
 
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
@@ -315,8 +399,9 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 	t.Cleanup(func() {
 		_, err := pool.Exec(
 			ctx,
-			"DELETE FROM payments WHERE reservation_id = $1",
-			createdReservation.ID,
+			`DELETE FROM payments
+			WHERE order_id = $1`,
+			createdOrder.ID,
 		)
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
@@ -329,6 +414,16 @@ func TestCreatePaymentProviderFailure(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM orders
+     WHERE id = $1`,
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 }
@@ -373,15 +468,7 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 
 	orderService := order.NewService(pool, queries)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createPaymentTestInventory(t, pool)
 
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
@@ -464,15 +551,18 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 	)
 
 	t.Cleanup(func() {
+		// 1. Payment
 		_, err := pool.Exec(
 			ctx,
-			"DELETE FROM payments WHERE reservation_id = $1",
-			createdReservation.ID,
+			`DELETE FROM payments
+			 WHERE order_id = $1`,
+			createdOrder.ID,
 		)
 		if err != nil {
 			t.Logf("cleanup payment failed: %v", err)
 		}
 
+		// 2. Reservation
 		_, err = pool.Exec(
 			ctx,
 			"DELETE FROM reservations WHERE id = $1",
@@ -480,6 +570,17 @@ func TestCreatePaymentProviderUnknown(t *testing.T) {
 		)
 		if err != nil {
 			t.Logf("cleanup reservation failed: %v", err)
+		}
+
+		// 3. Order
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM orders
+		 WHERE id = $1`,
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
 		}
 	})
 }
@@ -523,15 +624,7 @@ func TestMarkPaymentSucceeded(t *testing.T) {
 
 	orderService := order.NewService(pool, queries)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createPaymentTestInventory(t, pool)
 
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,

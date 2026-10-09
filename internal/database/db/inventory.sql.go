@@ -11,6 +11,39 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const adjustInventory = `-- name: AdjustInventory :one
+UPDATE inventory
+SET
+    quantity = quantity + $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+  AND quantity + $2 >= 0
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at
+`
+
+type AdjustInventoryParams struct {
+	VariantID pgtype.UUID
+	Quantity  int64
+}
+
+func (q *Queries) AdjustInventory(ctx context.Context, arg AdjustInventoryParams) (Inventory, error) {
+	row := q.db.QueryRow(ctx, adjustInventory, arg.VariantID, arg.Quantity)
+	var i Inventory
+	err := row.Scan(
+		&i.ID,
+		&i.VariantID,
+		&i.Quantity,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getInventory = `-- name: GetInventory :one
 SELECT
     i.variant_id,

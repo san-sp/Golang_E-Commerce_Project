@@ -47,15 +47,9 @@ func TestRecordPaymentEventDuplicate(t *testing.T) {
 		15*time.Minute,
 	)
 	orderService := order.NewService(pool, queries)
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+
+	variantID := createPaymentTestInventory(t, pool)
+
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
 		variantID,
@@ -336,6 +330,7 @@ func TestProcessPaymentWebhook(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create test order: %v", err)
 	}
+
 	// Create an ACTIVE reservation.
 	createdReservation, err := reservationService.CreateReservation(
 		ctx,
@@ -370,6 +365,50 @@ func TestProcessPaymentWebhook(t *testing.T) {
 	}
 	paymentID = payment.ID
 	paymentIDString = paymentID.String()
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM outbox_events
+         WHERE event_type = 'PAYMENT_SUCCEEDED'
+           AND payload->>'payment_id' = $1`,
+			paymentID.String(),
+		)
+		if err != nil {
+			t.Logf("cleanup outbox events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payment_events
+         WHERE payment_id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payments
+         WHERE id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM orders
+         WHERE id = $1`,
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
+		}
+	})
+
 	if payment.Status != "PENDING" {
 		t.Fatalf(
 			"expected payment status PENDING, got %s",
@@ -707,6 +746,7 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create test order: %v", err)
 	}
+
 	_, err = pool.Exec(
 		ctx,
 		`UPDATE reservations
@@ -730,6 +770,39 @@ func TestProcessPaymentWebhookRollback(t *testing.T) {
 		t.Fatalf("create payment: %v", err)
 	}
 	paymentID = createdPayment.ID
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM payment_events
+         WHERE payment_id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payments
+         WHERE id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM orders
+         WHERE id = $1`,
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
+		}
+	})
+
 	eventID := fmt.Sprintf(
 		"rollback-test-%d",
 		time.Now().UnixNano(),
@@ -1036,6 +1109,38 @@ func TestProcessPaymentWebhookInventoryRollback(t *testing.T) {
 	}
 
 	paymentID = createdPayment.ID
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM payment_events
+         WHERE payment_id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment events failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM payments
+         WHERE id = $1`,
+			paymentID,
+		)
+		if err != nil {
+			t.Logf("cleanup payment failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM orders
+         WHERE id = $1`,
+			createdOrder.ID,
+		)
+		if err != nil {
+			t.Logf("cleanup order failed: %v", err)
+		}
+	})
 
 	eventID := fmt.Sprintf(
 		"inventory-rollback-test-%d",

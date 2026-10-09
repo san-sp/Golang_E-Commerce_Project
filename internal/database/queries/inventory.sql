@@ -34,3 +34,17 @@ WHERE i.variant_id = $1
 GROUP BY
     i.variant_id,
     i.quantity;
+
+-- name: AdjustInventory :one
+UPDATE inventory
+SET
+    quantity = quantity + $2,
+    updated_at = NOW()
+WHERE variant_id = $1
+  AND quantity + $2 >= 0
+RETURNING
+    id,
+    variant_id,
+    quantity,
+    created_at,
+    updated_at;

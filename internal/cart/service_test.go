@@ -13,19 +13,10 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 )
 
-var testVariantID = pgtype.UUID{
-	Bytes: [16]byte{
-		0xc5, 0x17, 0x4f, 0x98,
-		0x5b, 0xa2, 0x45, 0x3e,
-		0x92, 0xfb, 0x26, 0x6e,
-		0x81, 0x8f, 0xbd, 0x92,
-	},
-	Valid: true,
-}
-
 func setupCartTest(t *testing.T) (
 	context.Context,
 	*db.Queries,
+	pgtype.UUID,
 	func(),
 ) {
 	t.Helper()
@@ -49,15 +40,63 @@ func setupCartTest(t *testing.T) (
 
 	queries := db.New(pool)
 
+	product, err := queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Cart Test Product",
+			Description: pgtype.Text{
+				String: "Cart test product",
+				Valid:  true,
+			},
+		},
+	)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("create test product: %v", err)
+	}
+
+	variant, err := queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: product.ID,
+			Sku:       "CART-TEST-" + uuid.NewString(),
+			Size: pgtype.Text{
+				String: "M",
+				Valid:  true,
+			},
+			Color: pgtype.Text{
+				String: "Black",
+				Valid:  true,
+			},
+			Price: 1000,
+		},
+	)
+	if err != nil {
+		pool.Close()
+		t.Fatalf("create test product variant: %v", err)
+	}
+
 	cleanup := func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id = $1`,
+			variant.ID,
+		)
+
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			product.ID,
+		)
+
 		pool.Close()
 	}
 
-	return ctx, queries, cleanup
+	return ctx, queries, variant.ID, cleanup
 }
 
 func TestCreateCart(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, _, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -87,7 +126,7 @@ func TestCreateCart(t *testing.T) {
 }
 
 func TestAddItemIncrementsExistingQuantity(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -102,7 +141,7 @@ func TestAddItemIncrementsExistingQuantity(t *testing.T) {
 			ctx,
 			db.RemoveCartItemParams{
 				CartID:    cart.ID,
-				VariantID: testVariantID,
+				VariantID: variantID,
 			},
 		)
 
@@ -112,7 +151,7 @@ func TestAddItemIncrementsExistingQuantity(t *testing.T) {
 	firstItem, err := service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		2,
 	)
 	if err != nil {
@@ -129,7 +168,7 @@ func TestAddItemIncrementsExistingQuantity(t *testing.T) {
 	secondItem, err := service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		3,
 	)
 	if err != nil {
@@ -145,7 +184,7 @@ func TestAddItemIncrementsExistingQuantity(t *testing.T) {
 }
 
 func TestAddItemRejectsInvalidQuantity(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -162,7 +201,7 @@ func TestAddItemRejectsInvalidQuantity(t *testing.T) {
 	_, err = service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		0,
 	)
 
@@ -175,7 +214,7 @@ func TestAddItemRejectsInvalidQuantity(t *testing.T) {
 }
 
 func TestAddItemRejectsConvertedCart(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -193,7 +232,7 @@ func TestAddItemRejectsConvertedCart(t *testing.T) {
 	_, err = service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		1,
 	)
 
@@ -206,7 +245,7 @@ func TestAddItemRejectsConvertedCart(t *testing.T) {
 }
 
 func TestUpdateItemQuantity(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -221,7 +260,7 @@ func TestUpdateItemQuantity(t *testing.T) {
 			ctx,
 			db.RemoveCartItemParams{
 				CartID:    cart.ID,
-				VariantID: testVariantID,
+				VariantID: variantID,
 			},
 		)
 
@@ -231,7 +270,7 @@ func TestUpdateItemQuantity(t *testing.T) {
 	_, err = service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		2,
 	)
 	if err != nil {
@@ -241,7 +280,7 @@ func TestUpdateItemQuantity(t *testing.T) {
 	item, err := service.UpdateItemQuantity(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		7,
 	)
 	if err != nil {
@@ -257,7 +296,7 @@ func TestUpdateItemQuantity(t *testing.T) {
 }
 
 func TestRemoveItem(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -272,7 +311,7 @@ func TestRemoveItem(t *testing.T) {
 			ctx,
 			db.RemoveCartItemParams{
 				CartID:    cart.ID,
-				VariantID: testVariantID,
+				VariantID: variantID,
 			},
 		)
 
@@ -282,7 +321,7 @@ func TestRemoveItem(t *testing.T) {
 	_, err = service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		2,
 	)
 	if err != nil {
@@ -292,7 +331,7 @@ func TestRemoveItem(t *testing.T) {
 	err = service.RemoveItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 	)
 	if err != nil {
 		t.Fatalf("remove item: %v", err)
@@ -302,7 +341,7 @@ func TestRemoveItem(t *testing.T) {
 		ctx,
 		db.GetCartItemParams{
 			CartID:    cart.ID,
-			VariantID: testVariantID,
+			VariantID: variantID,
 		},
 	)
 
@@ -312,7 +351,7 @@ func TestRemoveItem(t *testing.T) {
 }
 
 func TestGetCartItems(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, variantID, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)
@@ -327,7 +366,7 @@ func TestGetCartItems(t *testing.T) {
 			ctx,
 			db.RemoveCartItemParams{
 				CartID:    cart.ID,
-				VariantID: testVariantID,
+				VariantID: variantID,
 			},
 		)
 
@@ -337,7 +376,7 @@ func TestGetCartItems(t *testing.T) {
 	_, err = service.AddItem(
 		ctx,
 		cart.ID,
-		testVariantID,
+		variantID,
 		4,
 	)
 	if err != nil {
@@ -368,7 +407,7 @@ func TestGetCartItems(t *testing.T) {
 }
 
 func TestGetCartNotFound(t *testing.T) {
-	ctx, queries, cleanup := setupCartTest(t)
+	ctx, queries, _, cleanup := setupCartTest(t)
 	defer cleanup()
 
 	service := NewService(queries)

@@ -127,17 +127,80 @@ func setupTestServiceWithProvider(
 
 	return service, queries, provider
 }
+func createCheckoutTestVariant(
+	t *testing.T,
+	service *Service,
+) pgtype.UUID {
+	t.Helper()
 
-func testVariantID() pgtype.UUID {
-	return pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
+	ctx := context.Background()
+
+	product, err := service.queries.CreateProduct(
+		ctx,
+		db.CreateProductParams{
+			Name: "Checkout Test Product",
+			Description: pgtype.Text{
+				String: "Checkout test product",
+				Valid:  true,
+			},
 		},
-		Valid: true,
+	)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
 	}
+
+	variant, err := service.queries.CreateProductVariant(
+		ctx,
+		db.CreateProductVariantParams{
+			ProductID: product.ID,
+			Sku:       "CHECKOUT-TEST-" + uuid.NewString(),
+			Size: pgtype.Text{
+				String: "M",
+				Valid:  true,
+			},
+			Color: pgtype.Text{
+				String: "Black",
+				Valid:  true,
+			},
+			Price: 899900,
+		},
+	)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	_, err = service.pool.Exec(
+		ctx,
+		`INSERT INTO inventory (variant_id, quantity)
+		 VALUES ($1, $2)`,
+		variant.ID,
+		int64(10),
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM inventory WHERE variant_id = $1`,
+			variant.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id = $1`,
+			variant.ID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			product.ID,
+		)
+	})
+
+	return variant.ID
 }
 
 func TestCheckoutEmptyCart(t *testing.T) {
@@ -177,7 +240,7 @@ func TestCheckoutSuccess(t *testing.T) {
 	service, queries := setupTestService(t)
 
 	ctx := context.Background()
-	variantID := testVariantID()
+	variantID := createCheckoutTestVariant(t, service)
 
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
@@ -316,7 +379,7 @@ func TestCheckoutRollsBackOrderWhenReservationFails(t *testing.T) {
 	service, queries := setupTestService(t)
 
 	ctx := context.Background()
-	variantID := testVariantID()
+	variantID := createCheckoutTestVariant(t, service)
 
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
@@ -380,7 +443,7 @@ func TestCheckoutPaymentProviderFailure(t *testing.T) {
 	service, queries, provider := setupTestServiceWithProvider(t)
 
 	ctx := context.Background()
-	variantID := testVariantID()
+	variantID := createCheckoutTestVariant(t, service)
 
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
@@ -492,7 +555,7 @@ func TestCheckoutPaymentProviderUnknown(t *testing.T) {
 	service, queries, provider := setupTestServiceWithProvider(t)
 
 	ctx := context.Background()
-	variantID := testVariantID()
+	variantID := createCheckoutTestVariant(t, service)
 
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {
@@ -604,7 +667,7 @@ func TestCancelOrder(t *testing.T) {
 	service, queries := setupTestService(t)
 
 	ctx := context.Background()
-	variantID := testVariantID()
+	variantID := createCheckoutTestVariant(t, service)
 
 	cart, err := queries.CreateCart(ctx)
 	if err != nil {

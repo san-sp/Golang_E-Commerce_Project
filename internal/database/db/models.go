@@ -55,6 +55,16 @@ type Inventory struct {
 	UpdatedAt pgtype.Timestamptz
 }
 
+type InventoryMovement struct {
+	ID            pgtype.UUID
+	VariantID     pgtype.UUID
+	MovementType  string
+	Quantity      int64
+	ReferenceType pgtype.Text
+	ReferenceID   pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
+}
+
 type Order struct {
 	ID          pgtype.UUID
 	Status      string

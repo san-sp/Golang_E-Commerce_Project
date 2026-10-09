@@ -14,6 +14,59 @@ import (
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 )
 
+func createOrderTestVariant(t *testing.T, service *Service) pgtype.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+
+	var productID pgtype.UUID
+	err := service.pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+         VALUES ('Order Test Product', 'Test product')
+         RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	var variantID pgtype.UUID
+	err = service.pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+            product_id,
+            sku,
+            price
+         )
+         VALUES (
+            $1,
+            'order-test-' || gen_random_uuid()::text,
+            899900
+         )
+         RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE id = $1`,
+			variantID,
+		)
+
+		_, _ = service.pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id = $1`,
+			productID,
+		)
+	})
+
+	return variantID
+}
+
 func setupTestService(t *testing.T) (*Service, *db.Queries) {
 	t.Helper()
 
@@ -60,7 +113,7 @@ func TestCreateOrder(t *testing.T) {
 
 	ctx := context.Background()
 
-	variantID := testVariantID()
+	variantID := createOrderTestVariant(t, service)
 
 	order, items, err := service.CreateOrder(
 		ctx,
@@ -178,12 +231,13 @@ func TestGetOrder(t *testing.T) {
 	service, _ := setupTestService(t)
 
 	ctx := context.Background()
+	variantID := createOrderTestVariant(t, service)
 
 	createdOrder, _, err := service.CreateOrder(
 		ctx,
 		[]ItemInput{
 			{
-				VariantID: testVariantID(),
+				VariantID: variantID,
 				Quantity:  2,
 				UnitPrice: 899900,
 			},

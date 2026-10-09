@@ -8,11 +8,111 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/joho/godotenv"
 
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database"
 	"github.com/san-sp/Golang_E-Commerce_Project/internal/database/db"
 )
+
+func createReservationTestInventory(
+	t *testing.T,
+	pool *pgxpool.Pool,
+) pgtype.UUID {
+	t.Helper()
+
+	ctx := context.Background()
+
+	var productID pgtype.UUID
+
+	err := pool.QueryRow(
+		ctx,
+		`INSERT INTO products (name, description)
+		 VALUES ('Reservation Test Product', 'Test product')
+		 RETURNING id`,
+	).Scan(&productID)
+	if err != nil {
+		t.Fatalf("create test product: %v", err)
+	}
+
+	var variantID pgtype.UUID
+
+	err = pool.QueryRow(
+		ctx,
+		`INSERT INTO product_variants (
+			product_id,
+			sku,
+			price
+		)
+		VALUES (
+			$1,
+			'reservation-test-' || gen_random_uuid()::text,
+			899900
+		)
+		RETURNING id`,
+		productID,
+	).Scan(&variantID)
+	if err != nil {
+		t.Fatalf("create test variant: %v", err)
+	}
+
+	_, err = pool.Exec(
+		ctx,
+		`INSERT INTO inventory (
+			variant_id,
+			quantity
+		)
+		VALUES ($1, 10)`,
+		variantID,
+	)
+	if err != nil {
+		t.Fatalf("create test inventory: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_, err := pool.Exec(
+			ctx,
+			`DELETE FROM reservations
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup reservations failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM inventory
+			 WHERE variant_id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup inventory failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants
+			 WHERE id = $1`,
+			variantID,
+		)
+		if err != nil {
+			t.Logf("cleanup product variant failed: %v", err)
+		}
+
+		_, err = pool.Exec(
+			ctx,
+			`DELETE FROM products
+			 WHERE id = $1`,
+			productID,
+		)
+		if err != nil {
+			t.Logf("cleanup product failed: %v", err)
+		}
+	})
+
+	return variantID
+}
 
 func TestCreateReservation(t *testing.T) {
 	err := godotenv.Load("../../.env")
@@ -43,15 +143,7 @@ func TestCreateReservation(t *testing.T) {
 		15*time.Minute,
 	)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createReservationTestInventory(t, pool)
 
 	reservation, err := service.CreateReservation(
 		ctx,
@@ -107,16 +199,6 @@ func TestCreateReservation(t *testing.T) {
 
 	t.Logf("expected reservation failure: %v", err)
 
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			reservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup reservation failed: %v", err)
-		}
-	})
 }
 
 func TestExpireReservation(t *testing.T) {
@@ -142,15 +224,7 @@ func TestExpireReservation(t *testing.T) {
 
 	queries := db.New(pool)
 
-	variantID := pgtype.UUID{
-		Bytes: [16]byte{
-			0xc5, 0x17, 0x4f, 0x98,
-			0x5b, 0xa2, 0x45, 0x3e,
-			0x92, 0xfb, 0x26, 0x6e,
-			0x81, 0x8f, 0xbd, 0x92,
-		},
-		Valid: true,
-	}
+	variantID := createReservationTestInventory(t, pool)
 
 	expiredReservation, err := queries.CreateReservation(ctx, db.CreateReservationParams{
 		VariantID: variantID,
@@ -163,17 +237,6 @@ func TestExpireReservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create expired reservation: %v", err)
 	}
-
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			expiredReservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup expired reservation failed: %v", err)
-		}
-	})
 
 	expired, err := queries.ExpireReservation(ctx, expiredReservation.ID)
 	if err != nil {
@@ -198,17 +261,6 @@ func TestExpireReservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create future reservation: %v", err)
 	}
-
-	t.Cleanup(func() {
-		_, err := pool.Exec(
-			ctx,
-			"DELETE FROM reservations WHERE id = $1",
-			futureReservation.ID,
-		)
-		if err != nil {
-			t.Logf("cleanup future reservation failed: %v", err)
-		}
-	})
 
 	_, err = queries.ExpireReservation(ctx, futureReservation.ID)
 	if err == nil {

@@ -66,7 +66,7 @@ func TestGetInventory(t *testing.T) {
 		ctx,
 		db.CreateProductVariantParams{
 			ProductID: product.ID,
-			Sku:       "INV-TEST-001",
+			Sku:       "INV-TEST-" + uuid.NewString(),
 			Size: pgtype.Text{
 				String: "M",
 				Valid:  true,
