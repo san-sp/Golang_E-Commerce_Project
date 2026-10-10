@@ -111,6 +111,7 @@ func main() {
 		inventoryService,
 	)
 
+	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 
 	router.Use(
@@ -118,6 +119,10 @@ func main() {
 		apphttp.RequestIDMiddleware(),
 		apphttp.LoggingMiddleware(),
 	)
+
+	router.GET("/healthz", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
 
 	api := router.Group("/api/v1")
 
