@@ -19,8 +19,26 @@ type MessageHandler func(amqp091.Delivery) (ProcessingResult, error)
 
 type RetryHandler func(amqp091.Delivery) error
 
+type consumerChannel interface {
+	Qos(
+		prefetchCount int,
+		prefetchSize int,
+		global bool,
+	) error
+
+	Consume(
+		queue string,
+		consumer string,
+		autoAck bool,
+		exclusive bool,
+		noLocal bool,
+		noWait bool,
+		args amqp091.Table,
+	) (<-chan amqp091.Delivery, error)
+}
+
 type Consumer struct {
-	channel *amqp091.Channel
+	channel consumerChannel
 }
 
 func NewConsumer(channel *amqp091.Channel) *Consumer {
@@ -113,6 +131,9 @@ func (c *Consumer) Start(
 			if err != nil {
 				return err
 			}
+
+		default:
+			return fmt.Errorf("unknown processing result: %d", result)
 		}
 
 		if err != nil {
