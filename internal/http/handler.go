@@ -350,7 +350,7 @@ func (h *Handler) GetCategoryBySlug(c *gin.Context) {
 
 // AddProductToCategory assigns a product to a category.
 func (h *Handler) AddProductToCategory(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
 		return
@@ -377,7 +377,7 @@ func (h *Handler) AddProductToCategory(c *gin.Context) {
 
 // RemoveProductFromCategory removes a product from a category.
 func (h *Handler) RemoveProductFromCategory(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
 		return
@@ -404,7 +404,7 @@ func (h *Handler) RemoveProductFromCategory(c *gin.Context) {
 
 // ListProductCategories returns all categories assigned to a product.
 func (h *Handler) ListProductCategories(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid product ID"})
 		return
@@ -1552,7 +1552,7 @@ func (h *Handler) GetBrandBySlug(c *gin.Context) {
 }
 
 func (h *Handler) AssignProductBrand(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid product ID",
@@ -1598,7 +1598,7 @@ func (h *Handler) AssignProductBrand(c *gin.Context) {
 }
 
 func (h *Handler) ClearProductBrand(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid product ID",
@@ -1628,7 +1628,7 @@ func (h *Handler) ClearProductBrand(c *gin.Context) {
 }
 
 func (h *Handler) GetProductBrand(c *gin.Context) {
-	productID, err := uuid.Parse(c.Param("productID"))
+	productID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error": "invalid product ID",

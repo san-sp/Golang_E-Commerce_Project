@@ -153,11 +153,11 @@ func main() {
 	api.GET("/categories/:id", handler.GetCategory)
 	api.GET("/categories/slug/:slug", handler.GetCategoryBySlug)
 
-	api.POST("/products/:productID/categories/:categoryID", handler.AddProductToCategory)
-	api.DELETE("/products/:productID/categories/:categoryID", handler.RemoveProductFromCategory)
+	api.POST("/products/:id/categories/:categoryID", handler.AddProductToCategory)
+	api.DELETE("/products/:id/categories/:categoryID", handler.RemoveProductFromCategory)
 
-	api.GET("/products/:productID/categories", handler.ListProductCategories)
-	api.GET("/categories/:categoryID/products", handler.ListCategoryProducts)
+	api.GET("/products/:id/categories", handler.ListProductCategories)
+	api.GET("/categories/:id/products", handler.ListCategoryProducts)
 
 	// Brand
 	api.POST("/brands", handler.CreateBrand)
@@ -165,9 +165,9 @@ func main() {
 	api.GET("/brands/id/:id", handler.GetBrand)
 	api.GET("/brands/slug/:slug", handler.GetBrandBySlug)
 
-	api.POST("/products/:productID/brands/:brandID", handler.AssignProductBrand)
-	api.DELETE("/products/:productID/brand", handler.ClearProductBrand)
-	api.GET("/products/:productID/brand", handler.GetProductBrand)
+	api.POST("/products/:id/brands/:brandID", handler.AssignProductBrand)
+	api.DELETE("/products/:id/brand", handler.ClearProductBrand)
+	api.GET("/products/:id/brand", handler.GetProductBrand)
 
 	api.GET("/brands/:brandID/products", handler.ListBrandProducts)
 

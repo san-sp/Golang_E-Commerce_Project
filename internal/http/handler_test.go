@@ -496,17 +496,17 @@ func TestCategoryProductRelationshipHTTP(t *testing.T) {
 	router := gin.New()
 
 	router.POST(
-		"/products/:productID/categories/:categoryID",
+		"/products/:id/categories/:categoryID",
 		handler.AddProductToCategory,
 	)
 
 	router.DELETE(
-		"/products/:productID/categories/:categoryID",
+		"/products/:id/categories/:categoryID",
 		handler.RemoveProductFromCategory,
 	)
 
 	router.GET(
-		"/products/:productID/categories",
+		"/products/:id/categories",
 		handler.ListProductCategories,
 	)
 
@@ -996,17 +996,17 @@ func TestBrandHTTP(t *testing.T) {
 	router.GET("/api/v1/brands/slug/:slug", handler.GetBrandBySlug)
 
 	router.POST(
-		"/api/v1/products/:productID/brands/:brandID",
+		"/api/v1/products/:id/brands/:brandID",
 		handler.AssignProductBrand,
 	)
 
 	router.DELETE(
-		"/api/v1/products/:productID/brand",
+		"/api/v1/products/:id/brand",
 		handler.ClearProductBrand,
 	)
 
 	router.GET(
-		"/api/v1/products/:productID/brand",
+		"/api/v1/products/:id/brand",
 		handler.GetProductBrand,
 	)
 
