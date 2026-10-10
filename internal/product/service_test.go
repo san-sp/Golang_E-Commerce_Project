@@ -19,7 +19,6 @@ func setupProductTest(t *testing.T) (
 	context.Context,
 	*pgxpool.Pool,
 	*db.Queries,
-	func(),
 ) {
 	t.Helper()
 
@@ -41,16 +40,15 @@ func setupProductTest(t *testing.T) (
 
 	queries := db.New(pool)
 
-	cleanup := func() {
-		pool.Close()
-	}
+	// Register pool closure first. Test-specific t.Cleanup callbacks are
+	// registered later and therefore run before the pool is closed.
+	t.Cleanup(pool.Close)
 
-	return ctx, pool, queries, cleanup
+	return ctx, pool, queries
 }
 
 func TestGetProduct(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	product, err := queries.CreateProduct(ctx, db.CreateProductParams{
 		Name: "Test Product",
@@ -66,7 +64,7 @@ func TestGetProduct(t *testing.T) {
 	productID := uuid.UUID(product.ID.Bytes)
 
 	t.Cleanup(func() {
-		_, _ = queries.GetProduct(ctx, product.ID)
+		_, _ = pool.Exec(ctx, `DELETE FROM products WHERE id = $1`, product.ID)
 	})
 
 	service := NewService(nil, queries)
@@ -99,22 +97,10 @@ func TestGetProduct(t *testing.T) {
 		)
 	}
 
-	// Clean up the test record.
-	t.Cleanup(func() {
-		_, _ = pool.Exec(
-			ctx,
-			`DELETE FROM products WHERE id = $1`,
-			product.ID,
-		)
-	})
-
-	// No DELETE query is needed in the application query layer.
-	_, _ = queries.GetProduct(ctx, product.ID)
 }
 
 func TestGetProductNotFound(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -128,8 +114,7 @@ func TestGetProductNotFound(t *testing.T) {
 }
 
 func TestListProducts(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	firstProduct, err := queries.CreateProduct(
 		ctx,
@@ -176,8 +161,7 @@ func TestListProducts(t *testing.T) {
 }
 
 func TestSearchProducts(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	service := NewService(pool, queries)
 
@@ -191,7 +175,7 @@ func TestSearchProducts(t *testing.T) {
 		t.Fatalf("failed to create shirt product: %v", err)
 	}
 
-	_, err = queries.CreateProduct(ctx, db.CreateProductParams{
+	shoes, err := queries.CreateProduct(ctx, db.CreateProductParams{
 		Name:        "Running Shoes " + testID,
 		Description: pgtype.Text{String: "Another product", Valid: true},
 	})
@@ -202,8 +186,9 @@ func TestSearchProducts(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = pool.Exec(
 			ctx,
-			`DELETE FROM products WHERE id = $1`,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
 			shirt.ID,
+			shoes.ID,
 		)
 	})
 
@@ -286,8 +271,7 @@ func TestSearchProductsRejectsInvalidLimit(t *testing.T) {
 }
 
 func TestListProductsMinPrice(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	service := NewService(pool, queries)
 
@@ -308,6 +292,21 @@ func TestListProductsMinPrice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create non-qualifying product: %v", err)
 	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			qualifyingProduct.ID,
+			nonQualifyingProduct.ID,
+		)
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			qualifyingProduct.ID,
+			nonQualifyingProduct.ID,
+		)
+	})
 
 	// Qualifying product:
 	// variants = 60000 and 80000 paise
@@ -438,8 +437,7 @@ func TestListProductsMinPriceRejectsInvalidLimit(t *testing.T) {
 }
 
 func TestListProductsRejectsInvalidPage(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -453,8 +451,7 @@ func TestListProductsRejectsInvalidPage(t *testing.T) {
 }
 
 func TestListProductsRejectsInvalidLimit(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -468,8 +465,7 @@ func TestListProductsRejectsInvalidLimit(t *testing.T) {
 }
 
 func TestListProductsRejectsZeroLimit(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -483,8 +479,7 @@ func TestListProductsRejectsZeroLimit(t *testing.T) {
 }
 
 func TestListProductsSortCreatedAsc(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	firstProduct, err := queries.CreateProduct(
 		ctx,
@@ -518,11 +513,25 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 	_, err = pool.Exec(
 		ctx,
 		`UPDATE products
-	 SET created_at = CASE
-	     WHEN id = $1 THEN TIMESTAMPTZ '2020-01-01 00:00:00+00'
-	     WHEN id = $2 THEN TIMESTAMPTZ '2020-01-02 00:00:00+00'
-	 END
-	 WHERE id IN ($1, $2)`,
+			SET created_at = CASE
+					WHEN id = $1 THEN (
+						SELECT COALESCE(
+								MIN(created_at),
+								TIMESTAMPTZ '2020-01-01 00:00:00+00'
+							) - INTERVAL '2 hours'
+						FROM products
+						WHERE id NOT IN ($1, $2)
+					)
+					WHEN id = $2 THEN (
+						SELECT COALESCE(
+								MIN(created_at),
+								TIMESTAMPTZ '2020-01-01 00:00:00+00'
+							) - INTERVAL '1 hours'
+						FROM products
+						WHERE id NOT IN ($1, $2)
+					)
+				END
+			WHERE id IN ($1, $2)`,
 		firstProduct.ID,
 		secondProduct.ID,
 	)
@@ -573,8 +582,7 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 }
 
 func TestListProductsSortPriceAsc(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	service := NewService(pool, queries)
 
@@ -596,7 +604,22 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		t.Fatalf("failed to create expensive product: %v", err)
 	}
 
-	// Cheap product has variants priced at 1 and 2.
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			productCheap.ID,
+			productExpensive.ID,
+		)
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			productCheap.ID,
+			productExpensive.ID,
+		)
+	})
+
+	// The cheap product has variants priced at 1 and 2.
 	// Its listing price should therefore be 1.
 	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
 		ProductID: productCheap.ID,
@@ -620,7 +643,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 		t.Fatalf("failed to create cheap variant 2: %v", err)
 	}
 
-	// Expensive product has variants priced at 3 and 4.
+	// The expensive product has variants priced at 3 and 4.
 	// Its listing price should therefore be 3.
 	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
 		ProductID: productExpensive.ID,
@@ -678,8 +701,7 @@ func TestListProductsSortPriceAsc(t *testing.T) {
 }
 
 func TestListProductsSortPriceDesc(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	service := NewService(pool, queries)
 
@@ -700,6 +722,21 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create expensive product: %v", err)
 	}
+
+	t.Cleanup(func() {
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM product_variants WHERE product_id IN ($1, $2)`,
+			productCheap.ID,
+			productExpensive.ID,
+		)
+		_, _ = pool.Exec(
+			ctx,
+			`DELETE FROM products WHERE id IN ($1, $2)`,
+			productCheap.ID,
+			productExpensive.ID,
+		)
+	})
 
 	_, err = queries.CreateProductVariant(ctx, db.CreateProductVariantParams{
 		ProductID: productCheap.ID,
@@ -753,8 +790,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 }
 
 func TestListProductsRejectsInvalidSort(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -773,8 +809,7 @@ func TestListProductsRejectsInvalidSort(t *testing.T) {
 }
 
 func TestGetProductVariant(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	product, err := queries.CreateProduct(ctx, db.CreateProductParams{
 		Name: "Test Product",
@@ -854,8 +889,7 @@ func TestGetProductVariant(t *testing.T) {
 }
 
 func TestGetProductVariantNotFound(t *testing.T) {
-	ctx, _, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, _, queries := setupProductTest(t)
 
 	service := NewService(nil, queries)
 
@@ -869,8 +903,7 @@ func TestGetProductVariantNotFound(t *testing.T) {
 }
 
 func TestListProductVariants(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	product, err := queries.CreateProduct(
 		ctx,
@@ -972,8 +1005,7 @@ func TestListProductVariants(t *testing.T) {
 }
 
 func TestListProductVariantsReturnsEmptyList(t *testing.T) {
-	ctx, pool, queries, cleanup := setupProductTest(t)
-	defer cleanup()
+	ctx, pool, queries := setupProductTest(t)
 
 	product, err := queries.CreateProduct(
 		ctx,

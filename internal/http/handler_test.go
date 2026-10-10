@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1348,11 +1349,25 @@ func TestListProductsSortCreatedAsc(t *testing.T) {
 	_, err = pool.Exec(
 		ctx,
 		`UPDATE products
-		 SET created_at = CASE
-		     WHEN id = $1 THEN TIMESTAMPTZ '2020-01-01 00:00:00+00'
-		     WHEN id = $2 THEN TIMESTAMPTZ '2020-01-02 00:00:00+00'
-		 END
-		 WHERE id IN ($1, $2)`,
+			SET created_at = CASE
+					WHEN id = $1 THEN (
+						SELECT COALESCE(
+								MIN(created_at),
+								TIMESTAMPTZ '2020-01-01 00:00:00+00'
+							) - INTERVAL '2 hours'
+						FROM products
+						WHERE id NOT IN ($1, $2)
+					)
+					WHEN id = $2 THEN (
+						SELECT COALESCE(
+								MIN(created_at),
+								TIMESTAMPTZ '2020-01-01 00:00:00+00'
+							) - INTERVAL '1 hours'
+						FROM products
+						WHERE id NOT IN ($1, $2)
+					)
+				END
+			WHERE id IN ($1, $2)`,
 		productA.ID,
 		productB.ID,
 	)
@@ -1634,6 +1649,21 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		t.Fatalf("create product B: %v", err)
 	}
 
+	var highestPrice int64
+
+	err = pool.QueryRow(
+		ctx,
+		`SELECT COALESCE(MAX(price), 0)
+     FROM product_variants`,
+	).Scan(&highestPrice)
+	if err != nil {
+		t.Fatalf("get highest variant price: %v", err)
+	}
+
+	if highestPrice > math.MaxInt64-2 {
+		t.Fatal("not enough price range above the existing maximum")
+	}
+
 	testID := uuid.NewString()
 
 	_, err = queries.CreateProductVariant(
@@ -1641,7 +1671,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		db.CreateProductVariantParams{
 			ProductID: productA.ID,
 			Sku:       "HTTP-PRICE-DESC-A-" + testID,
-			Price:     900000001,
+			Price:     highestPrice + 2,
 		},
 	)
 	if err != nil {
@@ -1653,7 +1683,7 @@ func TestListProductsSortPriceDesc(t *testing.T) {
 		db.CreateProductVariantParams{
 			ProductID: productB.ID,
 			Sku:       "HTTP-PRICE-DESC-B-" + testID,
-			Price:     900000000,
+			Price:     highestPrice + 1,
 		},
 	)
 	if err != nil {
