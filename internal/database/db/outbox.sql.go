@@ -17,13 +17,14 @@ WITH claimed AS (
     FROM outbox_events
     WHERE status = 'PENDING'
     ORDER BY created_at
-    LIMIT 100
+    LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
 UPDATE outbox_events AS o
 SET
     status = 'PROCESSING',
-    processing_at = NOW()
+    processing_at = NOW(),
+    processing_token = gen_random_uuid()
 FROM claimed
 WHERE o.id = claimed.id
 RETURNING
@@ -35,11 +36,12 @@ RETURNING
     o.last_attempted_at,
     o.attempts,
     o.status,
-    o.processing_at
+    o.processing_at,
+    o.processing_token
 `
 
-func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, error) {
-	rows, err := q.db.Query(ctx, claimPendingOutboxEvents)
+func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context, batchSize int32) ([]OutboxEvent, error) {
+	rows, err := q.db.Query(ctx, claimPendingOutboxEvents, batchSize)
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +59,7 @@ func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, 
 			&i.Attempts,
 			&i.Status,
 			&i.ProcessingAt,
+			&i.ProcessingToken,
 		); err != nil {
 			return nil, err
 		}
@@ -94,9 +97,21 @@ type CreateOutboxEventParams struct {
 	Payload   []byte
 }
 
-func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (OutboxEvent, error) {
+type CreateOutboxEventRow struct {
+	ID              pgtype.UUID
+	EventType       string
+	Payload         []byte
+	CreatedAt       pgtype.Timestamptz
+	PublishedAt     pgtype.Timestamptz
+	LastAttemptedAt pgtype.Timestamptz
+	Attempts        int32
+	Status          string
+	ProcessingAt    pgtype.Timestamptz
+}
+
+func (q *Queries) CreateOutboxEvent(ctx context.Context, arg CreateOutboxEventParams) (CreateOutboxEventRow, error) {
 	row := q.db.QueryRow(ctx, createOutboxEvent, arg.EventType, arg.Payload)
-	var i OutboxEvent
+	var i CreateOutboxEventRow
 	err := row.Scan(
 		&i.ID,
 		&i.EventType,
@@ -154,15 +169,27 @@ WHERE status = 'PENDING'
 ORDER BY created_at
 `
 
-func (q *Queries) ListPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, error) {
+type ListPendingOutboxEventsRow struct {
+	ID              pgtype.UUID
+	EventType       string
+	Payload         []byte
+	CreatedAt       pgtype.Timestamptz
+	PublishedAt     pgtype.Timestamptz
+	LastAttemptedAt pgtype.Timestamptz
+	Attempts        int32
+	Status          string
+	ProcessingAt    pgtype.Timestamptz
+}
+
+func (q *Queries) ListPendingOutboxEvents(ctx context.Context) ([]ListPendingOutboxEventsRow, error) {
 	rows, err := q.db.Query(ctx, listPendingOutboxEvents)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []OutboxEvent
+	var items []ListPendingOutboxEventsRow
 	for rows.Next() {
-		var i OutboxEvent
+		var i ListPendingOutboxEventsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.EventType,
@@ -184,39 +211,60 @@ func (q *Queries) ListPendingOutboxEvents(ctx context.Context) ([]OutboxEvent, e
 	return items, nil
 }
 
-const markOutboxEventPublished = `-- name: MarkOutboxEventPublished :exec
+const markOutboxEventPublished = `-- name: MarkOutboxEventPublished :execrows
 UPDATE outbox_events
 SET
     status = 'PUBLISHED',
-    published_at = NOW()
+    published_at = NOW(),
+    processing_at = NULL,
+    processing_token = NULL
 WHERE id = $1
   AND status = 'PROCESSING'
+  AND processing_token = $2
 `
 
-func (q *Queries) MarkOutboxEventPublished(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markOutboxEventPublished, id)
-	return err
+type MarkOutboxEventPublishedParams struct {
+	ID              pgtype.UUID
+	ProcessingToken pgtype.UUID
 }
 
-const markOutboxPublishAttempt = `-- name: MarkOutboxPublishAttempt :exec
+func (q *Queries) MarkOutboxEventPublished(ctx context.Context, arg MarkOutboxEventPublishedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markOutboxEventPublished, arg.ID, arg.ProcessingToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const markOutboxPublishAttempt = `-- name: MarkOutboxPublishAttempt :execrows
 UPDATE outbox_events
 SET
     attempts = attempts + 1,
     last_attempted_at = NOW()
 WHERE id = $1
   AND status = 'PROCESSING'
+  AND processing_token = $2
 `
 
-func (q *Queries) MarkOutboxPublishAttempt(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markOutboxPublishAttempt, id)
-	return err
+type MarkOutboxPublishAttemptParams struct {
+	ID              pgtype.UUID
+	ProcessingToken pgtype.UUID
+}
+
+func (q *Queries) MarkOutboxPublishAttempt(ctx context.Context, arg MarkOutboxPublishAttemptParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markOutboxPublishAttempt, arg.ID, arg.ProcessingToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const recoverStaleOutboxEvents = `-- name: RecoverStaleOutboxEvents :exec
 UPDATE outbox_events
 SET
     status = 'PENDING',
-    processing_at = NULL
+    processing_at = NULL,
+    processing_token = NULL
 WHERE status = 'PROCESSING'
   AND processing_at < NOW() - INTERVAL '5 minutes'
 `

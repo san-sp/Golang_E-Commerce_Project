@@ -94,6 +94,7 @@ type OutboxEvent struct {
 	Attempts        int32
 	Status          string
 	ProcessingAt    pgtype.Timestamptz
+	ProcessingToken pgtype.UUID
 }
 
 type Payment struct {

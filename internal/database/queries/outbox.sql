@@ -19,13 +19,14 @@ WITH claimed AS (
     FROM outbox_events
     WHERE status = 'PENDING'
     ORDER BY created_at
-    LIMIT 100
+    LIMIT sqlc.arg('batch_size')
     FOR UPDATE SKIP LOCKED
 )
 UPDATE outbox_events AS o
 SET
     status = 'PROCESSING',
-    processing_at = NOW()
+    processing_at = NOW(),
+    processing_token = gen_random_uuid()
 FROM claimed
 WHERE o.id = claimed.id
 RETURNING
@@ -37,29 +38,35 @@ RETURNING
     o.last_attempted_at,
     o.attempts,
     o.status,
-    o.processing_at;
+    o.processing_at,
+    o.processing_token;
 
--- name: MarkOutboxPublishAttempt :exec
+-- name: MarkOutboxPublishAttempt :execrows
 UPDATE outbox_events
 SET
     attempts = attempts + 1,
     last_attempted_at = NOW()
 WHERE id = $1
-  AND status = 'PROCESSING';
+  AND status = 'PROCESSING'
+  AND processing_token = $2;
 
--- name: MarkOutboxEventPublished :exec
+-- name: MarkOutboxEventPublished :execrows
 UPDATE outbox_events
 SET
     status = 'PUBLISHED',
-    published_at = NOW()
+    published_at = NOW(),
+    processing_at = NULL,
+    processing_token = NULL
 WHERE id = $1
-  AND status = 'PROCESSING';
+  AND status = 'PROCESSING'
+  AND processing_token = $2;
 
 -- name: RecoverStaleOutboxEvents :exec
 UPDATE outbox_events
 SET
     status = 'PENDING',
-    processing_at = NULL
+    processing_at = NULL,
+    processing_token = NULL
 WHERE status = 'PROCESSING'
   AND processing_at < NOW() - INTERVAL '5 minutes';
 

@@ -18,6 +18,7 @@ type Worker struct {
 	cleanupInterval  time.Duration
 	retention        time.Duration
 	cleanupBatchSize int32
+	batchSize        int32
 }
 
 func NewWorker(
@@ -32,6 +33,7 @@ func NewWorker(
 		cleanupInterval:  time.Hour,
 		retention:        7 * 24 * time.Hour,
 		cleanupBatchSize: 500,
+		batchSize:        10,
 	}
 }
 
@@ -99,7 +101,7 @@ func (w *Worker) process(ctx context.Context) error {
 
 	fmt.Println("Recovered stale outbox events")
 
-	events, err := w.queries.ClaimPendingOutboxEvents(ctx)
+	events, err := w.queries.ClaimPendingOutboxEvents(ctx, w.batchSize)
 	if err != nil {
 		return fmt.Errorf("claim pending outbox events: %w", err)
 	}
@@ -123,12 +125,26 @@ func (w *Worker) process(ctx context.Context) error {
 			continue
 		}
 
-		err = w.queries.MarkOutboxPublishAttempt(ctx, event.ID)
+		rowsAffected, err := w.queries.MarkOutboxPublishAttempt(
+			ctx,
+			db.MarkOutboxPublishAttemptParams{
+				ID:              event.ID,
+				ProcessingToken: event.ProcessingToken,
+			},
+		)
 		if err != nil {
 			fmt.Printf(
 				"Failed to record publish attempt for %s: %v\n",
 				event.ID,
 				err,
+			)
+			continue
+		}
+
+		if rowsAffected != 1 {
+			fmt.Printf(
+				"Skipping event %s: claim ownership was lost\n",
+				event.ID,
 			)
 			continue
 		}
@@ -152,7 +168,13 @@ func (w *Worker) process(ctx context.Context) error {
 			continue
 		}
 
-		err = w.queries.MarkOutboxEventPublished(ctx, event.ID)
+		rowsAffected, err = w.queries.MarkOutboxEventPublished(
+			ctx,
+			db.MarkOutboxEventPublishedParams{
+				ID:              event.ID,
+				ProcessingToken: event.ProcessingToken,
+			},
+		)
 		if err != nil {
 			fmt.Printf(
 				"Failed to mark event %s as published: %v\n",
@@ -162,7 +184,16 @@ func (w *Worker) process(ctx context.Context) error {
 			continue
 		}
 
+		if rowsAffected != 1 {
+			fmt.Printf(
+				"Published event %s, but claim ownership was lost before marking it published\n",
+				event.ID,
+			)
+			continue
+		}
+
 		fmt.Println("Event published successfully")
+
 	}
 
 	return nil
