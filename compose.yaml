@@ -2,16 +2,12 @@ services:
   postgres:
     image: postgres:16-alpine
     container_name: go-ecommerce-postgres
-
     env_file:
       - .env.docker
-
     ports:
       - '5434:5432'
-
     volumes:
       - go_ecommerce_postgres_data:/var/lib/postgresql/data
-
     healthcheck:
       test:
         - CMD-SHELL
@@ -20,20 +16,16 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
-
     restart: unless-stopped
 
   migrate:
     image: migrate/migrate:v4.18.3
     container_name: go-ecommerce-migrate
-
     depends_on:
       postgres:
         condition: service_healthy
-
     volumes:
       - ./migrations:/migrations:ro
-
     command:
       - '-path=/migrations'
       - '-database'
@@ -44,21 +36,96 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-
+      args:
+        APP: api
     image: go-ecommerce-api:dev
     container_name: go-ecommerce-api
-
     env_file:
       - .env.docker
-
     ports:
       - '8080:8080'
-
     depends_on:
       migrate:
         condition: service_completed_successfully
+    restart: unless-stopped
 
+  outbox-publisher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: outbox-publisher
+    image: go-ecommerce-outbox-publisher:dev
+    container_name: go-ecommerce-outbox-publisher
+    env_file:
+      - .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  payment-consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: payment-consumer
+    image: go-ecommerce-payment-consumer:dev
+    container_name: go-ecommerce-payment-consumer
+    env_file:
+      - .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  reservation-expiration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP: reservation-expiration
+    image: go-ecommerce-reservation-expiration:dev
+    container_name: go-ecommerce-reservation-expiration
+    env_file:
+      - .env.docker
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      disable: true
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: go-ecommerce-rabbitmq
+    env_file:
+      - .env.docker
+    ports:
+      - '5673:5672'
+      - '15673:15672'
+    volumes:
+      - go_ecommerce_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test:
+        - CMD
+        - rabbitmq-diagnostics
+        - -q
+        - ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
 
 volumes:
   go_ecommerce_postgres_data:
+  go_ecommerce_rabbitmq_data:
